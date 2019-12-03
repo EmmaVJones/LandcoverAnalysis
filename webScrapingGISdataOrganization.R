@@ -74,7 +74,42 @@ downloadTigerRoadsByYear <- function(year,fileName,outDirectory){
   }
 }
  
-downloadTigerRoadsByYear(2018,VAoptions[1:2], 'tigerRoadsPull')
+downloadTigerRoadsByYear(2018,VAoptions[1:5], 'tigerRoadsPull')
 
 
 # now need to build something to extract and combine all files into single shapefile
+library(sf)
+
+unzip('tigerRoadsPull/tl_2018_50001_roads.zip', exdir='tigerRoadsPull/unzipped')
+unzip('tigerRoadsPull/tl_2018_50003_roads.zip', exdir='tigerRoadsPull/unzipped')
+unzip('tigerRoadsPull/tl_2018_50005_roads.zip', exdir='tigerRoadsPull/unzipped')
+unzip('tigerRoadsPull/tl_2018_50007_roads.zip', exdir='tigerRoadsPull/unzipped')
+unzip('tigerRoadsPull/tl_2018_50009_roads.zip', exdir='tigerRoadsPull/unzipped')
+
+
+
+# can't unzip and read in with st_read in same step
+
+
+test <- st_read('tigerRoadsPull/unzipped/tl_2018_50001_roads.shp')
+test1 <- st_read('tigerRoadsPull/unzipped/tl_2018_50003_roads.shp')
+
+
+
+test2 <- st_join(test, test1)
+st_write(test2, 'test2.shp')
+
+
+rbind(st_read('tigerRoadsPull/unzipped/tl_2018_50001_roads.shp'),
+               st_read('tigerRoadsPull/unzipped/tl_2018_50003_roads.shp'),
+               st_read('tigerRoadsPull/unzipped/tl_2018_50005_roads.shp'),
+               st_read('tigerRoadsPull/unzipped/tl_2018_50007_roads.shp'),
+               st_read('tigerRoadsPull/unzipped/tl_2018_50009_roads.shp')) %>%
+  st_write('test3.shp')
+
+# works
+
+
+# now send over all unzipped files
+
+
