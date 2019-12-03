@@ -25,8 +25,8 @@ library(sf) # 0.7-7
 
 # e.g. https://www2.census.gov/geo/tiger/TIGER2018/  is the appropriate web address for 2018 data.
 
-FTPaddress <- "https://www2.census.gov/geo/tiger/TIGER2018/ROADS"
-year <- 2018
+FTPaddress <- "https://www2.census.gov/geo/tiger/TIGER2016/ROADS"
+year <- 2016
 dirName <- 'tigerRoadsPull' # create a folder in the project directory with this exact name to store
                             # all downloaded zip files
 
@@ -42,16 +42,21 @@ scraping_tiger <- read_html(FTPaddress) %>% # edit this
 # Step 2.1: Identify all counties that intersect the VA NHD
 #This was done in GIS by clipping US county data to the VA NHD. All the state and county FIPS codes that 
 # could fall into a given probmon watershed are then able to be efficiently downloaded from the TIGER FTP
-VANHD <- st_read('G:/evjones/GIS/ProbMonGIS/GISdata/nhd_83albers.shp')
-UScounties <- st_read('GISdata/tl_2017_us_county.shp') %>%
-  st_transform(st_crs(VANHD))
+#VANHD <- st_read('G:/evjones/GIS/ProbMonGIS/GISdata/nhd_83albers.shp')
+#UScounties <- st_read('GISdata/tl_2017_us_county.shp') %>%
+#  st_transform(st_crs(VANHD))
 
-nhdCounties <-  st_join(VANHD, UScounties, join = st_intersects)%>%
-  filter(!is.na(STATEFP)) %>% # only keep rows that joined
+#nhdCounties <-  UScounties[VANHD, ] 
+#st_write(nhdCounties, "GISdata/counties.shp")
+
+#rm(UScounties);rm(VANHD)
+
+# Don't need to repeat above step more than once, here are counties we need
+nhdCounties <- st_read('GISdata/counties.shp') %>%
   st_set_geometry(NULL) %>%
   distinct(GEOID) # keep only unique FIPS codes (already concatinated with state + county)
+  
 
-rm(UScounties);rm(VANHD)
 
 # Step 3: Download all appropriate files.
 
@@ -66,20 +71,20 @@ downloadTigerRoadsByYear <- function(year,fileName,outDirectory){
 
 downloadTigerRoadsByYear(year,
                          paste0('tl_',year,'_', as.character(nhdCounties$GEOID),'_roads.zip'),
-                         dirName)
-
+                         paste0(dirName,'/', year))
+#in unzip folder there is tl_2016_10005_roads.zip
 
 # Step 4: Unzip and combine all files in the dirName directory into one shapefile
-filenames <- list.files(dirName, pattern="*.zip", full.names=TRUE)
-filenames <- filenames[-length(filenames)] # remove the last bogus record
-lapply(filenames, unzip, exdir='tigerRoadsPull/unzipped') # unzip all filenames that end in zip into folder named unzipped
-filenames_slim <- gsub('.zip', '' , gsub('tigerRoadsPull/','', filenames ))
+filenames <- list.files( paste0(dirName,'/', year), pattern="*.zip", full.names=TRUE)
+#filenames <- filenames[-length(filenames)] # remove the last bogus record, only for 2018
+lapply(filenames, unzip, exdir=paste0('tigerRoadsPull/unzipped/',year)) # unzip all filenames that end in zip into folder named unzipped
+filenames_slim <- gsub('.zip', '' , gsub(paste0('tigerRoadsPull/',year,'/'),'', filenames ))
 
 # check to make sure all downloaded files were unzipped correctly
-filenamesUnzipped <- list.files(paste0(dirName,'/unzipped'), pattern="*.cpg", full.names=F) # search by .cpg bc .shp has a few extension options and duplicates unique names
+filenamesUnzipped <- list.files(paste0(dirName,'/unzipped/',year), pattern="*.cpg", full.names=F) # search by .cpg bc .shp has a few extension options and duplicates unique names
 filenamesUnzipped_slim <- gsub('.cpg','',filenamesUnzipped)
 
-all(gsub('.zip', '' , gsub('tigerRoadsPull/','', filenames )) %in% filenamesUnzipped_slim )
+all(filenames_slim %in% filenamesUnzipped_slim )
 # if true then cool
 
 # if not then find out which missing
