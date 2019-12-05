@@ -25,8 +25,8 @@ library(sf) # 0.7-7
 
 # e.g. https://www2.census.gov/geo/tiger/TIGER2018/  is the appropriate web address for 2018 data.
 
-FTPaddress <- "https://www2.census.gov/geo/tiger/TIGER2016/ROADS"
-year <- 2016
+year <- 2017
+FTPaddress <- paste0("https://www2.census.gov/geo/tiger/TIGER",year,"/ROADS")
 dirName <- 'tigerRoadsPull' # create a folder in the project directory with this exact name to store
                             # all downloaded zip files
 
@@ -35,9 +35,9 @@ dirName <- 'tigerRoadsPull' # create a folder in the project directory with this
 
 
 # Step 2: Scrape FTP page for headers.  The scraping_tiger object will contain all available files for 
-scraping_tiger <- read_html(FTPaddress) %>% # edit this 
-  html_nodes("tr") %>% # find only table records
-  html_text() # convert to character object
+#scraping_tiger <- read_html(FTPaddress) %>% # edit this 
+ # html_nodes("tr") %>% # find only table records
+#  html_text() # convert to character object
 
 # Step 2.1: Identify all counties that intersect the VA NHD
 #This was done in GIS by clipping US county data to the VA NHD. All the state and county FIPS codes that 
@@ -92,7 +92,7 @@ filenames_slim [!(filenames_slim %in% filenamesUnzipped_slim )]
 # an output of character(0) is good because it means there are none missing
 
 # Step 5: Read in unzipped files and combine to single object
-filenamesUnzipped <- paste0(dirName,'/unzipped/',gsub('.cpg','.shp', filenamesUnzipped)) # change .cpg to .shp for file reading in
+filenamesUnzipped <- paste0(dirName,'/unzipped/',year,'/',gsub('.cpg','.shp', filenamesUnzipped)) # change .cpg to .shp for file reading in
 
 shapefiles <- filenamesUnzipped %>%
   map(st_read) %>%
