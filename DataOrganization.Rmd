@@ -1,0 +1,55 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+
+This notebook overviews the data organization behind the landcover analysis tools. The landcover scripts output a number of metrics describing watershed and riparian land use as well as watershed scale impervious surfaces, VPDES permits, dams stream network metrics, elevation, slope, rainfall, population, and road density metrics. 
+
+### NLCD data
+
+NLCD data is available for download from the multi-resolution land characteristics consortium (https://www.mrlc.gov/) with data downloads for the following years available: 2001, 2006, 2011, 2013, and 2016 at the time of writing this document.
+
+Impervious data is not available for 2013, so landcover analyses are restricted to the following years: 2001, 2006, 2011, and 2016.
+
+After downloading the appropriate CONUS landcover and urban imperviousness layers (percent developed imperviousness) (https://www.mrlc.gov/data?f%5B0%5D=category%3Aland%20cover&f%5B1%5D=region%3Aconus), the files are brought into ArcGIS and clipped to an area exceeding the VA NHD extent. The easiest way to get this information is to clip the CONUS layer to the extent of 2001 landcover layer. After each of these layers are clipped to the boundaries, they need to be exported from ArcGIS as .tiff files such that they can be read into R without blowing up the memory (using raster package).
+
+### VPDES Permit Data
+
+This dataset was created prior to 2010 from a query built in 'Discoverer.' Current data querying tools have prevented the updating of this layer.
+
+### Dams
+
+This dataset was originally created by DCR in an unknown year. 
+
+
+### Streams
+
+The 1:100k NHD is used for stream length and density calculations since the ProbMon program is built on a 1:100k sample frame.
+
+### Elevation & Slope
+
+These DEM's were passed on from Mike McLeod.
+
+### Rainfall
+
+These 30 year models were passed on from Mike McLeod.
+
+### Population
+
+These datasets need to be periodically updated when US census spatial data is released (each decade). The tool currently runs block population data from 1990, 2000, and 2010. 
+
+https://www.census.gov/geographies/reference-maps/2010/geo/2010-census-block-maps.html
+
+At present the population data is limited to just Virginia block pop data. No other state is being considered in the population even if the watershed exceeds VA boundaries.
+
+### Roads
+
+The TIGER road network was previously built on just 2010 data to split the window data was collected in (about 2001-2015 at the time of programming). The reason for the single year of data was because of the labor intensive process required to acquiring and combining tiger road data (available by county only at higher resolutions). In 2019, Emma Jones built a script that scrapes all available tiger road data for a given year from the US census FTP site. The script then unzips all files for Virginia and combines into a single shapefile for further spatial analyses. The data is available yearly from 2006. 
+
+The script to pull a new years worth of data is called tigerRoadsWebScrapingScript.R
+
+
+

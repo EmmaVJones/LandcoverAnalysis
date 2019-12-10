@@ -1,3 +1,4 @@
+
 # Built in R 3.6.1
 
 # This script scrapes all available tiger road data for a given year from the US census FTP site.
@@ -25,7 +26,7 @@ library(sf) # 0.7-7
 
 # e.g. https://www2.census.gov/geo/tiger/TIGER2018/  is the appropriate web address for 2018 data.
 
-year <- 2017
+year <- 2010
 FTPaddress <- paste0("https://www2.census.gov/geo/tiger/TIGER",year,"/ROADS")
 dirName <- 'tigerRoadsPull' # create a folder in the project directory with this exact name to store
                             # all downloaded zip files
@@ -81,8 +82,8 @@ lapply(filenames, unzip, exdir=paste0('tigerRoadsPull/unzipped/',year)) # unzip 
 filenames_slim <- gsub('.zip', '' , gsub(paste0('tigerRoadsPull/',year,'/'),'', filenames ))
 
 # check to make sure all downloaded files were unzipped correctly
-filenamesUnzipped <- list.files(paste0(dirName,'/unzipped/',year), pattern="*.cpg", full.names=F) # search by .cpg bc .shp has a few extension options and duplicates unique names
-filenamesUnzipped_slim <- gsub('.cpg','',filenamesUnzipped)
+filenamesUnzipped <- list.files(paste0(dirName,'/unzipped/',year), pattern="*.shx", full.names=F) # search by .cpg bc .shp has a few extension options and duplicates unique names
+filenamesUnzipped_slim <- gsub('.shx','',filenamesUnzipped)
 
 all(filenames_slim %in% filenamesUnzipped_slim )
 # if true then cool
@@ -92,7 +93,7 @@ filenames_slim [!(filenames_slim %in% filenamesUnzipped_slim )]
 # an output of character(0) is good because it means there are none missing
 
 # Step 5: Read in unzipped files and combine to single object
-filenamesUnzipped <- paste0(dirName,'/unzipped/',year,'/',gsub('.cpg','.shp', filenamesUnzipped)) # change .cpg to .shp for file reading in
+filenamesUnzipped <- paste0(dirName,'/unzipped/',year,'/',gsub('.shx','.shp', filenamesUnzipped)) # change .cpg to .shp for file reading in
 
 shapefiles <- filenamesUnzipped %>%
   map(st_read) %>%
