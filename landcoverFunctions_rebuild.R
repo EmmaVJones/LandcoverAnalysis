@@ -18,15 +18,12 @@ landcoverCounts <- function(landcover, wshdPoly){
 
 
 landuseDataManagement <- function(x){ #x is dataframe 
-  Result <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,totalArea_sqMile=NA,PWater=NA,N_INDEX=NA
-                       ,PFOR=NA,PWETL=NA,PSHRB=NA,PNG=NA,PBAR=NA,PTotBAR=NA,U_INDEX=NA,PURB=NA
-                       ,PMBAR=NA,PAGT=NA,PAGP=NA,PAGC=NA,S=NA,H=NA,Hprime=NA,C=NA) 
-z <- x %>%
+  z <- x %>%
     group_by(StationID, YearSampled) %>%
     pivot_longer(cols = starts_with("VALUE_"),names_to = "variable", 
                  values_to = 'value') 
-
-landusewide_new <- z %>%
+  
+  landusewide <- z %>%
     mutate(acre = 900 * value * 0.0002471053814672,
            sqMile = acre*0.0015625,
            hectare = sqMile * 258.9988110336,
@@ -65,90 +62,47 @@ landusewide_new <- z %>%
            PAGP = (AGP_sqMile / totalArea_sqMile) * 100,
            AGC_sqMile = sum(sqMile[which(variable == 'VALUE_82')]),
            PAGC = (AGC_sqMile / totalArea_sqMile) * 100) %>%
-  distinct(StationID, YearSampled, NLCD, .keep_all = T) %>%
-  dplyr::select(StationID, totalArea_sqMile, PWater, N_INDEX, PFOR, PWETL, 
-                PSHRB, PNG, PBAR, U_INDEX, PURB, PMBAR, PAGT, PAGP, PAGC)
-           
+    distinct(StationID, YearSampled, NLCD, .keep_all = T) %>%
+    dplyr::select(StationID, YearSampled, totalArea_sqMile, PWater, N_INDEX, PFOR, PWETL, 
+                  PSHRB, PNG, PBAR, PTotBAR, U_INDEX, PURB, PMBAR, PAGT, PAGP, PAGC)
+  
+  diversity <- z %>% # still grouped on StationID and Year
+    # Complete diversity calculations
+    mutate( Count = ifelse(value>0,1,0),
+            m = sum(Count),
+            Psum = sum(value),
+            P_i = value / Psum,
+            P_i_ln_1 = P_i*(log(P_i)),
+            P_i2_1 = (value / Psum) ^2,
+            P_i_ln = sum(P_i_ln_1, na.rm = T),
+            P_i2 = sum(P_i2_1, na.rm = T)) %>%
+    distinct(StationID, YearSampled, .keep_all = T) %>%
+    mutate(S = m,
+           H = -(P_i_ln),
+           Hprime = H / log(S),
+           C = 1 - sum(P_i2)) %>%
+    dplyr::select(StationID, YearSampled, NLCD, S, H, Hprime, C) 
+  
+  # Join back landusewide data
+  Result <- left_join(landusewide, diversity, by = c('StationID', 'YearSampled')) %>%
+    dplyr::select(StationID,YearSampled,NLCD,everything())
+  
+  return(Result)}
   
   
-
   
-  for(z in 1:nrow(x)){
-    df0.5 <- x[z,1:3] # save year sampled and NLCD year info
-    df1 <- melt(x[z,-c(2:3)], 'StationID')
-    df2 <- aggregate(. ~ StationID + variable, data=df1,sum)
-    landuse <- mutate(df2, acre=900*value*0.0002471053814672,sqMile=acre*0.0015625
-                      ,hectare=sqMile*258.9988110336)
-    landuse2 <- aggregate(cbind(sqMile) ~ StationID, data=landuse, FUN='sum')
-    names(landuse2) <- c('StationID','totalArea_sqMile')
-    landuse3 <- merge(landuse, landuse2, by='StationID')
-    landuse4 <- plyr::ddply(landuse3,c('StationID','variable'),mutate
-                      ,Water_sqMile=sum(sqMile[(variable=='VALUE_11')])
-                      ,PWater=(Water_sqMile/totalArea_sqMile)*100
-                      ,N_sqMile=sum(sqMile[(variable=='VALUE_31')|(variable=='VALUE_41')
-                                           |(variable=='VALUE_42')|(variable=='VALUE_43')
-                                           |(variable=='VALUE_51')|(variable=='VALUE_52')
-                                           |(variable=='VALUE_71')|(variable=='VALUE_72')
-                                           |(variable=='VALUE_73')|(variable=='VALUE_74')
-                                           |(variable=='VALUE_91')|(variable=='VALUE_95')])
-                      ,N_INDEX=(N_sqMile/totalArea_sqMile)*100
-                      ,Forest_sqMile=sum(sqMile[(variable=='VALUE_41')|(variable=='VALUE_42')
-                                                |(variable=='VALUE_43')])
-                      ,PFOR=(sum(Forest_sqMile)/totalArea_sqMile)*100
-                      ,Wetland_sqMile=sum(sqMile[(variable=='VALUE_90')|(variable=='VALUE_95')])
-                      ,PWETL=(Wetland_sqMile/totalArea_sqMile)*100
-                      ,Shrub_sqMile=sum(sqMile[(variable=='VALUE_51')|(variable=='VALUE_52')])
-                      ,PSHRB=(Shrub_sqMile/totalArea_sqMile)*100
-                      ,Ngrasslands_sqMile=sum(sqMile[(variable=='VALUE_71')|(variable=='VALUE_72')
-                                                     |(variable=='VALUE_73')|(variable=='VALUE_74')])
-                      ,PNG=(Ngrasslands_sqMile/totalArea_sqMile)*100
-                      ,Barren_sqMile=sum(sqMile[(variable=='VALUE_31')])
-                      ,PBAR=(Barren_sqMile/totalArea_sqMile)*100
-                      ,TotBarren_sqMile=sum(sqMile[(variable=='VALUE_21')|(variable=='VALUE_31')])
-                      ,PTotBAR=(TotBarren_sqMile/totalArea_sqMile)*100
-                      ,U_sqMile=sum(sqMile[(variable=='VALUE_21')|(variable=='VALUE_22')
-                                           |(variable=='VALUE_23')|(variable=='VALUE_24')
-                                           |(variable=='VALUE_81')|(variable=='VALUE_82')])
-                      ,U_INDEX=(U_sqMile/totalArea_sqMile)*100
-                      ,Urban_sqMile=sum(sqMile[(variable=='VALUE_21')|(variable=='VALUE_22')
-                                               |(variable=='VALUE_23')|(variable=='VALUE_24')])
-                      ,PURB=(Urban_sqMile/totalArea_sqMile)*100
-                      ,MBAR_sqMile=sum(sqMile[(variable=='VALUE_21')])
-                      ,PMBAR=(MBAR_sqMile/totalArea_sqMile)*100
-                      ,AGT_sqMile=sum(sqMile[(variable=='VALUE_81')|(variable=='VALUE_82')])
-                      ,PAGT=(AGT_sqMile/totalArea_sqMile)*100
-                      ,AGP_sqMile=sum(sqMile[(variable=='VALUE_81')])
-                      ,PAGP=(AGP_sqMile/totalArea_sqMile)*100
-                      ,AGC_sqMile=sum(sqMile[(variable=='VALUE_82')])
-                      ,PAGC=(AGC_sqMile/totalArea_sqMile)*100)
-    landuselong <- melt(landuse4,id.vars=c('StationID','totalArea_sqMile')
-                        ,measure.vars=c('PWater','N_INDEX','PFOR','PWETL','PSHRB','PNG','PBAR','PTotBAR','U_INDEX'
-                                        ,'PURB','PMBAR','PAGT','PAGP','PAGC'))
-    landusewide<- dcast(landuselong,StationID+totalArea_sqMile~variable,value.var='value',sum)
-    ## Diversity metrics
-    landuse <- mutate(landuse, Count=ifelse(value>0,1,0))
-    classcount <- cast(landuse,Count~StationID,length)
-    classcount <- if(length(classcount$Count)>1){classcount[2,]}else{classcount[1,]}
-    classcount <- melt(classcount, val.name=Count)
-    cellcount <- aggregate(.~StationID, data=df2,sum)
-    count <- merge(cellcount,classcount, by='StationID')
-    names(count) <- c('StationID','_','Psum','_','m')
-    D1 <- merge(df2,count, by='StationID')
-    D2 <- plyr::ddply(D1, c('StationID','variable','value','Psum','m'),summarise, P_i=value/Psum
-                ,P_i_ln= P_i*(log(P_i)),P_i2=(value/Psum)^2)
-    D3 <- aggregate(cbind(P_i_ln,P_i2)~StationID,data=D2,sum)
-    D4 <- merge(D3, count, by='StationID')
-    D5 <- ddply(D4,c('StationID','m','P_i_ln','P_i2'),mutate,S=m,H=-(P_i_ln)
-                ,Hprime=H/log(S),C=1-sum(P_i2))
-    Diversity <- subset(D5,select=c('StationID','S','H','Hprime','C'))%>%
-      join(df0.5,by='StationID')
-    ## Combine landusewide and diversity metrics, include NLCD info
-    Result_ <- join(landusewide,Diversity,by='StationID')%>%select(StationID,YearSampled,NLCD,everything())
-    Result <- rbind(Result,Result_)}
-  Result <- Result[complete.cases(Result[,1]),]
-  return(Result)
-}
-
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
 ripCalc <- function(x,y){
   # Buffer just the stream segments in selected watershed
   buffer <- gBuffer(testnhd, width=y)
