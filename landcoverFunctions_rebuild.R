@@ -21,6 +21,58 @@ landuseDataManagement <- function(x){ #x is dataframe
   Result <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,totalArea_sqMile=NA,PWater=NA,N_INDEX=NA
                        ,PFOR=NA,PWETL=NA,PSHRB=NA,PNG=NA,PBAR=NA,PTotBAR=NA,U_INDEX=NA,PURB=NA
                        ,PMBAR=NA,PAGT=NA,PAGP=NA,PAGC=NA,S=NA,H=NA,Hprime=NA,C=NA) 
+z <- x %>%
+    group_by(StationID, YearSampled) %>%
+    pivot_longer(cols = starts_with("VALUE_"),names_to = "variable", 
+                 values_to = 'value') 
+
+landusewide_new <- z %>%
+    mutate(acre = 900 * value * 0.0002471053814672,
+           sqMile = acre*0.0015625,
+           hectare = sqMile * 258.9988110336,
+           totalArea_sqMile = sum(sqMile),
+           Water_sqMile = sum(sqMile[which(variable=='VALUE_11')]),
+           PWater=(Water_sqMile / totalArea_sqMile) *100,
+           N_sqMile = sum(sqMile[which(variable %in% c('VALUE_31','VALUE_41','VALUE_42',
+                                                       'VALUE_43','VALUE_51','VALUE_51',
+                                                       'VALUE_71','VALUE_72','VALUE_73',
+                                                       'VALUE_74','VALUE_91','VALUE_95'))]),
+           N_INDEX = (N_sqMile / totalArea_sqMile) * 100,
+           Forest_sqMile = sum(sqMile[which(variable %in% c('VALUE_41','VALUE_42','VALUE_43'))]),
+           PFOR = (Forest_sqMile / totalArea_sqMile) * 100,
+           Wetland_sqMile = sum(sqMile[which(variable %in% c('VALUE_90','VALUE_95'))]),
+           PWETL = (Wetland_sqMile / totalArea_sqMile) * 100,
+           Shrub_sqMile = sum(sqMile[which(variable %in% c('VALUE_51','VALUE_52'))]),
+           PSHRB = (Shrub_sqMile / totalArea_sqMile) * 100,
+           Ngrasslands_sqMile = sum(sqMile[which(variable %in% c('VALUE_71','VALUE_72',
+                                                                 'VALUE_73','VALUE_74'))]),
+           PNG = (Ngrasslands_sqMile / totalArea_sqMile) * 100,
+           Barren_sqMile = sum(sqMile[which(variable =='VALUE_31')]),
+           PBAR = (Barren_sqMile / totalArea_sqMile) * 100,
+           TotBarren_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_31'))]),
+           PTotBAR = (TotBarren_sqMile / totalArea_sqMile) * 100,
+           U_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_22','VALUE_23',
+                                                       'VALUE_24','VALUE_81','VALUE_82'))]),
+           U_INDEX = (U_sqMile / totalArea_sqMile) * 100,
+           Urban_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_22',
+                                                           'VALUE_23','VALUE_24'))]),
+           PURB = (Urban_sqMile / totalArea_sqMile) * 100,
+           MBAR_sqMile = sum(sqMile[which(variable == 'VALUE_21')]),
+           PMBAR = (MBAR_sqMile / totalArea_sqMile) * 100,
+           AGT_sqMile = sum(sqMile[which(variable %in% c('VALUE_81','VALUE_82'))]),
+           PAGT = (AGT_sqMile / totalArea_sqMile) * 100,
+           AGP_sqMile = sum(sqMile[which(variable == 'VALUE_81')]),
+           PAGP = (AGP_sqMile / totalArea_sqMile) * 100,
+           AGC_sqMile = sum(sqMile[which(variable == 'VALUE_82')]),
+           PAGC = (AGC_sqMile / totalArea_sqMile) * 100) %>%
+  distinct(StationID, YearSampled, NLCD, .keep_all = T) %>%
+  dplyr::select(StationID, totalArea_sqMile, PWater, N_INDEX, PFOR, PWETL, 
+                PSHRB, PNG, PBAR, U_INDEX, PURB, PMBAR, PAGT, PAGP, PAGC)
+           
+  
+  
+
+  
   for(z in 1:nrow(x)){
     df0.5 <- x[z,1:3] # save year sampled and NLCD year info
     df1 <- melt(x[z,-c(2:3)], 'StationID')
@@ -30,7 +82,7 @@ landuseDataManagement <- function(x){ #x is dataframe
     landuse2 <- aggregate(cbind(sqMile) ~ StationID, data=landuse, FUN='sum')
     names(landuse2) <- c('StationID','totalArea_sqMile')
     landuse3 <- merge(landuse, landuse2, by='StationID')
-    landuse4 <- ddply(landuse3,c('StationID','variable'),mutate
+    landuse4 <- plyr::ddply(landuse3,c('StationID','variable'),mutate
                       ,Water_sqMile=sum(sqMile[(variable=='VALUE_11')])
                       ,PWater=(Water_sqMile/totalArea_sqMile)*100
                       ,N_sqMile=sum(sqMile[(variable=='VALUE_31')|(variable=='VALUE_41')
@@ -82,7 +134,7 @@ landuseDataManagement <- function(x){ #x is dataframe
     count <- merge(cellcount,classcount, by='StationID')
     names(count) <- c('StationID','_','Psum','_','m')
     D1 <- merge(df2,count, by='StationID')
-    D2 <- ddply(D1, c('StationID','variable','value','Psum','m'),summarise, P_i=value/Psum
+    D2 <- plyr::ddply(D1, c('StationID','variable','value','Psum','m'),summarise, P_i=value/Psum
                 ,P_i_ln= P_i*(log(P_i)),P_i2=(value/Psum)^2)
     D3 <- aggregate(cbind(P_i_ln,P_i2)~StationID,data=D2,sum)
     D4 <- merge(D3, count, by='StationID')
