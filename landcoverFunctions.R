@@ -11,7 +11,7 @@ landuseCalc <- function(x){
     et <- lapply(e,table)
     if(!length(et[[1]])==0){ 
       t <- melt(et)
-      t.cast <- dcast(t, L1 ~ Var.1, sum)
+      t.cast <- dcast(t, L1 ~ Var1, sum)
       names(t.cast)[1] <- "StationID"
       print(t.cast[1,1] <- wshdList[x])
       colnames(t.cast)[2:length(names(t.cast))] <- paste("VALUE_",colnames(t.cast)
@@ -29,12 +29,12 @@ landuseCalc <- function(x){
       results <- results[rep(seq_len(nrow(results)), each=nrow(years)),]# i think this is correct to do nrow(years)??????????????????
       results$YearSampled <- ifelse(is.na(years$Year_),years$Year_,years$year)#correct for defaulting Year_=2011 when NA
       row.names(results) <- 1:nrow(results) #change row.names
-      results <- select(results,StationID,YearSampled,NLCD,everything())
+      results <- dplyr::select(results,StationID,YearSampled,NLCD,everything())
     }else(#if only one row(year) just need to add on YearSampled
       results <- mutate(results,YearSampled=ifelse(is.na(years$Year_),years$Year_,years$year))%>% #correct for defaulting Year_=2011 when NA
-        select(StationID,YearSampled,NLCD,everything()))
+        dplyr::select(StationID,YearSampled,NLCD,everything()))
   }else{# this means more than 1 NLCD year needs to be run, must loop through them
-    results <- template %>%mutate(StationID=NA,YearSampled=NA,NLCD=NA)%>%select(StationID,YearSampled,NLCD,everything())
+    results <- template %>%mutate(StationID=NA,YearSampled=NA,NLCD=NA)%>%dplyr::select(StationID,YearSampled,NLCD,everything())
     nNLCDyears <- aggregate(data.frame(count=years[,8]),list(NLCDyrs=years[,8]),length)
     for(i in 1:nrow(nNLCDyears)){
       landcover <- if(nNLCDyears[i,1]==2001){landcover2001}else{if(nNLCDyears[i,1]==2006){landcover2006}else{landcover2011}}
@@ -61,11 +61,11 @@ landuseCalc <- function(x){
         step1 <- subset(years,NLCDyear %in% nNLCDyears[i,1])
         results_$YearSampled <- ifelse(is.na(step1$Year_),step1$Year_,step1$year)#correct for defaulting Year_=2011 when NA
         row.names(results_) <- 1:nrow(results_) #change row.names
-        results_ <- select(results_,StationID,YearSampled,NLCD,everything())
+        results_ <- dplyr::select(results_,StationID,YearSampled,NLCD,everything())
       }else{#if only one row(year) just need to add on YearSampled
         step1 <- subset(years,NLCDyear %in% nNLCDyears[i,1])
         results_ <- mutate(results_,YearSampled=ifelse(is.na(years$Year_[i]),years$Year_[i],years$year[i]))%>%#correct for defaulting Year_=2011 when NA
-          select(StationID,YearSampled,NLCD,everything())}
+          dplyr::select(StationID,YearSampled,NLCD,everything())}
       results <- rbind(results,results_)
     }
   }
@@ -86,7 +86,7 @@ landuseDataManagement <- function(x){ #x is dataframe
     landuse2 <- aggregate(cbind(sqMile) ~ StationID, data=landuse, FUN='sum')
     names(landuse2) <- c('StationID','totalArea_sqMile')
     landuse3 <- merge(landuse, landuse2, by='StationID')
-    landuse4 <- ddply(landuse3,c('StationID','variable'),mutate
+    landuse4 <- plyr::ddply(landuse3,c('StationID','variable'),mutate
                       ,Water_sqMile=sum(sqMile[(variable=='VALUE_11')])
                       ,PWater=(Water_sqMile/totalArea_sqMile)*100
                       ,N_sqMile=sum(sqMile[(variable=='VALUE_31')|(variable=='VALUE_41')
@@ -138,16 +138,16 @@ landuseDataManagement <- function(x){ #x is dataframe
     count <- merge(cellcount,classcount, by='StationID')
     names(count) <- c('StationID','_','Psum','_','m')
     D1 <- merge(df2,count, by='StationID')
-    D2 <- ddply(D1, c('StationID','variable','value','Psum','m'),summarise, P_i=value/Psum
+    D2 <- plyr::ddply(D1, c('StationID','variable','value','Psum','m'),summarise, P_i=value/Psum
                 ,P_i_ln= P_i*(log(P_i)),P_i2=(value/Psum)^2)
     D3 <- aggregate(cbind(P_i_ln,P_i2)~StationID,data=D2,sum)
     D4 <- merge(D3, count, by='StationID')
-    D5 <- ddply(D4,c('StationID','m','P_i_ln','P_i2'),mutate,S=m,H=-(P_i_ln)
+    D5 <- plyr::ddply(D4,c('StationID','m','P_i_ln','P_i2'),mutate,S=m,H=-(P_i_ln)
                 ,Hprime=H/log(S),C=1-sum(P_i2))
     Diversity <- subset(D5,select=c('StationID','S','H','Hprime','C'))%>%
-      join(df0.5,by='StationID')
+      left_join(df0.5,by='StationID')
     ## Combine landusewide and diversity metrics, include NLCD info
-    Result_ <- join(landusewide,Diversity,by='StationID')%>%select(StationID,YearSampled,NLCD,everything())
+    Result_ <- left_join(landusewide,Diversity,by='StationID')%>%dplyr::select(StationID,YearSampled,NLCD,everything())
     Result <- rbind(Result,Result_)}
   Result <- Result[complete.cases(Result[,1]),]
   return(Result)
@@ -187,12 +187,12 @@ ripCalc <- function(x,y){
       results <- results[rep(seq_len(nrow(results)), each=nrow(years)),]
       results$YearSampled <- ifelse(is.na(years$Year_),years$Year_,years$year)
       row.names(results) <- 1:nrow(results) #change row.names
-      results <- select(results,StationID,YearSampled,NLCD,everything())
+      results <- dplyr::select(results,StationID,YearSampled,NLCD,everything())
     }else(#if only one row(year) just need to add on YearSampled
       results <- mutate(results,YearSampled=ifelse(is.na(years$Year_[1]),years$Year_[1],years$year[1]))%>%#correct for defaulting Year_=2011 when NA)%>%
-        select(StationID,YearSampled,NLCD,everything()))
+        dplyr::select(StationID,YearSampled,NLCD,everything()))
   }else{# this means more than 1 NLCD year needs to be run, must loop through them
-    results <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA)%>%select(StationID,YearSampled,NLCD,everything())
+    results <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA)%>%dplyr::select(StationID,YearSampled,NLCD,everything())
     nNLCDyears <- aggregate(data.frame(count=years[,8]),list(NLCDyrs=years[,8]),length)
     for(b in 1:nrow(nNLCDyears)){
       landcover <- if(nNLCDyears[b,1]==2001){landcover2001}else{if(nNLCDyears[b,1]==2006){landcover2006}else{landcover2011}}
@@ -220,11 +220,11 @@ ripCalc <- function(x,y){
         step1 <- subset(years,NLCDyear %in% nNLCDyears[b,1])
         results_$YearSampled <- ifelse(is.na(step1$Year_),step1$Year_,step1$year)
         row.names(results_) <- 1:nrow(results_) #change row.names
-        results_ <- select(results_,StationID,YearSampled,NLCD,everything())
+        results_ <- dplyr::select(results_,StationID,YearSampled,NLCD,everything())
       }else{#if only one row(year) just need to add on YearSampled
         step1 <- subset(years,NLCDyear %in% nNLCDyears[b,1])
         results_ <- mutate(results_,YearSampled=ifelse(is.na(step1$Year_),step1$Year_,step1$year))%>%
-          select(StationID,YearSampled,NLCD,everything())}
+          dplyr::select(StationID,YearSampled,NLCD,everything())}
       results <- rbind(results,results_)
     }
   }
@@ -244,7 +244,7 @@ riparianDataManagment <- function(x,y){
                    ,hectare=sqMile*258.9988110336)
     rip2 <- summarise(rip1,StationID=wshdList[x],totalArea_sqMile=sum(sqMile))
     rip3 <- merge(rip1,rip2, by='StationID')
-    rip4 <- ddply(rip3,c('StationID','variable'),mutate
+    rip4 <- plyr::ddply(rip3,c('StationID','variable'),mutate
                   ,N_sqMile=sum(sqMile[(variable=='VALUE_31')|(variable=='VALUE_41')
                                        |(variable=='VALUE_42')|(variable=='VALUE_43')
                                        |(variable=='VALUE_51')|(variable=='VALUE_52')
@@ -285,7 +285,7 @@ riparianDataManagment <- function(x,y){
                      ,measure.vars=c('RNAT','RFOR','RWETL','RSHRB','RNG','RBAR','RTotBAR','RHUM'
                                      ,'RURB','RMBAR','RAGT','RAGP','RAGC'))
     rip.wide_ <- dcast(rip.long,StationID~variable,value.var='value',sum)%>%
-      merge(rip0.5,by='StationID')%>%select(StationID,YearSampled,NLCD,everything())
+      merge(rip0.5,by='StationID')%>%dplyr::select(StationID,YearSampled,NLCD,everything())
     rip.wide <- rbind(rip.wide,rip.wide_)
   }
   rip.wide <- rip.wide[complete.cases(rip.wide$StationID),]
@@ -325,7 +325,7 @@ VPDESdataManagement <- function(x){# x is a dataframe
                      ,IndMinor=ifelse(c(MAJOR__MIN=='Minor'&MUNICIPAL_=='Industrial'),1,0))
   vaVPDES2[is.na(vaVPDES2)] <- 0 # make 0 to enable subsequent sum function
   # Sum all permit types based on StationID
-  vaVPDES3 <- ddply(vaVPDES2,'StationID',summarise,MunMajor=sum(MunMajor)
+  vaVPDES3 <- plyr::ddply(vaVPDES2,'StationID',summarise,MunMajor=sum(MunMajor)
                     ,MunMinor=sum(MunMinor),IndMajor=sum(IndMajor),IndMinor=sum(IndMinor))}
 
 
@@ -337,7 +337,7 @@ damCount <- function(x){
     damselect <- mutate(damselect, StationID=wshdPolys@data$StationID[x]
                         ,Dam= ifelse(is.na(NID_HEIGHT),0,1))%>%
       summarise(damcount=sum(Dam))%>%mutate(StationID=wshdPolys@data$StationID[x])%>%
-      select(StationID,damcount)}
+      dplyr::select(StationID,damcount)}
   if(nrow(s@data)==0){
     damselect <- data.frame(StationID=wshdPolys@data$StationID[x],damcount=0)}
   damsummary <- rbind(damsdf,damselect)
@@ -354,7 +354,7 @@ streamCalcs <- function(x){
     streams <- data.frame(StationID=wshdPolys@data$StationID[x],STRMLEN=gLength(testnhd))%>%
       merge(landusewide[,c('StationID','YearSampled','NLCD','totalArea_sqMile')],by='StationID')%>%
       mutate(streamlength_km=STRMLEN/1000,STRMDENS=streamlength_km/(totalArea_sqMile*2.58999))%>%
-      select(StationID,YearSampled,NLCD,STRMLEN,STRMDENS)
+      dplyr::select(StationID,YearSampled,NLCD,STRMLEN,STRMDENS)
   }
   return(streams)
 }
@@ -389,12 +389,12 @@ imperviousCalc <- function(x){
       results <- results[rep(seq_len(nrow(results)), each=nrow(years)),]
       results$YearSampled <- ifelse(is.na(years$Year_),years$Year_,years$year)
       row.names(results) <- 1:nrow(results) #change row.names
-      results <- select(results,StationID,YearSampled,NLCD,everything())
+      results <- dplyr::select(results,StationID,YearSampled,NLCD,everything())
     }else(#if only one row(year) just need to add on YearSampled
       results <- mutate(results,YearSampled=ifelse(is.na(years$Year_),years$Year_,years$year))%>%#correct for defaulting Year_=2011 when NA
-        select(StationID,YearSampled,NLCD,everything()))
+        dplyr::select(StationID,YearSampled,NLCD,everything()))
   }else{# this means more than 1 NLCD year needs to be run, must loop through them
-    results <- templatei%>%mutate(StationID=NA,YearSampled=NA,NLCD=NA)%>%select(StationID,YearSampled,NLCD,everything())
+    results <- templatei%>%mutate(StationID=NA,YearSampled=NA,NLCD=NA)%>%dplyr::select(StationID,YearSampled,NLCD,everything())
     nNLCDyears <- aggregate(data.frame(count=years[,8]),list(NLCDyrs=years[,8]),length)
     for(i in 1:nrow(nNLCDyears)){
       impervious <- if(nNLCDyears[i,1]==2001){imperv2001}else{if(nNLCDyears[i,1]==2006){imperv2006}else{imperv2011}}
@@ -417,11 +417,11 @@ imperviousCalc <- function(x){
         step1 <- subset(years,NLCDyear %in% nNLCDyears[i,1])
         results_$YearSampled <- ifelse(is.na(step1$Year_),step1$Year_,step1$year)
         row.names(results_) <- 1:nrow(results_) #change row.names
-        results_ <- select(results_,StationID,YearSampled,NLCD,everything())
+        results_ <- dplyr::select(results_,StationID,YearSampled,NLCD,everything())
       }else{#if only one row(year) just need to add on YearSampled
         step1 <- subset(years,NLCDyear %in% nNLCDyears[i,1])
         results_ <- mutate(results_,YearSampled=ifelse(is.na(step1$Year_),step1$Year_,step1$year))%>%
-          select(StationID,YearSampled,NLCD,everything())}
+          dplyr::select(StationID,YearSampled,NLCD,everything())}
       results <- rbind(results,results_)
     }
   }
@@ -439,7 +439,7 @@ imperviousDataManagement <- function(x){# x is a df
     imperv_ <- summarise(imperv1,StationID=StationID[1],totalArea_sqMile=sum(sqMile)
                          ,sqMileImp=sum(sqMileImp))%>%
       mutate(wshdImpPCT=(sqMileImp/totalArea_sqMile)*100)%>%
-      join(dfi0.5,by='StationID')%>%select(StationID,YearSampled,NLCD,sqMileImp,wshdImpPCT)
+      left_join(dfi0.5,by='StationID')%>%dplyr::select(StationID,YearSampled,NLCD,sqMileImp,wshdImpPCT)
     imperv <- rbind(imperv,imperv_)}
   imperv <- imperv[complete.cases(imperv$StationID),]
 }

@@ -31,14 +31,14 @@ saveHere <- 'Results'
 #wshdList <- as.character(wshdPolys$StationID)
 #siteList <- as.character(wshdSites$StationID)
 
-wshdPolys1 <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
+wshdPolys <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
   filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94")) %>%
   dplyr::select(StationID)
-wshdSites1 <- st_read('GISdata/AllStations_through2016.shp') %>%
+wshdSites <- st_read('GISdata/AllStations_through2016.shp') %>%
   filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94")) %>%
   dplyr::select(StationID)
-wshdList1 <- as.character(wshdPolys1$StationID)
-siteList1 <- as.character(wshdSites1$StationID)
+#wshdList <- as.character(wshdPolys$StationID)
+siteList <- as.character(wshdSites$StationID)
 
 
 wshdPolys <- st_read('GISdata/EmmaMessAround/TwinWatersheds.shp')
@@ -62,16 +62,10 @@ years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
                                between(year, 2009, 2013) ~ 2011,
                                between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
 
-years <- filter(criticalLink, StationID %in% wshdPolys1$StationID) %>%
-  mutate(year = ifelse(!is.na(Year_),Year_,2016), # get rid of NA's, replace with 2016 for now bc most recent NLCD release
-         NLCDyear = case_when( between(year, 2000, 2003) ~ 2001, 
-                               between(year, 2004, 2008) ~ 2006,
-                               between(year, 2009, 2013) ~ 2011,
-                               between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
 
 
 wshdPolys <- left_join(wshdPolys, years, by = 'StationID')
-wshdPolys1 <- left_join(wshdPolys1, years, by = 'StationID')
+wshdList <- as.character(wshdPolys$StationID)
 
 
 # Bring in appropriate landcover layer 
@@ -82,7 +76,7 @@ landcover2016 <- raster(paste(wd,"/nlcd2016.TIF",sep=""))
 
 
 # Bring in landcover functions for appropriate yearly analysis
-source('landcoverFunctions.R')
+source('landcoverFunctions_rebuild.R')
 
 
 
@@ -94,20 +88,20 @@ template <- tibble(StationID = 'template', VALUE_11=0,VALUE_21=0,VALUE_22=0, VAL
                        ,VALUE_81=0,VALUE_82=0,VALUE_90=0,VALUE_95=0)
 
 # Run the functions
-df <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA)%>%
-  dplyr::select(StationID,YearSampled,NLCD,everything())
+df <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA, sqMi=NA)%>%
+  dplyr::select(StationID,YearSampled,NLCD,everything(), sqMi)
 
-for(i in 1:length(wshdList1)){
+for(i in 1:length(wshdList)){
   #l <- landuseCalc(i)
-  l <- landcoverCounts(get(paste0('landcover',wshdPolys1$NLCDyear[i])), wshdPolys1[i,])
+  l <- landcoverCounts(template, get(paste0('landcover',wshdPolys$NLCDyear[i])), wshdPolys[i,])
   df <- rbind(df,l) # must use rbind() instead of df[i,] <- l because l could be multiple rows
   df <- df[complete.cases(df[,1]),]#remove any placeholder rows
 }
 
-landusewide1 <- landuseDataManagement(df)
+landusewide <- landuseDataManagement(df)
 
-write.csv(landusewide,paste(saveHere,'landusewide.csv',sep=''))
-
+#write.csv(landusewide,paste(saveHere,'landusewide.csv',sep=''))
+rm(l); rm(df)
 
 #### RIPARIAN CALCULATIONS 
 # Bring in NHD polyline file
@@ -115,10 +109,10 @@ write.csv(landusewide,paste(saveHere,'landusewide.csv',sep=''))
 nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
 
 # Set up dataframes to store riparian landcover data
-df1 <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA) %>% 
-  dplyr::select(StationID,YearSampled,NLCD,everything())
-df30 <- df1
-df120 <- df1
+#df1 <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA) %>% 
+#  dplyr::select(StationID,YearSampled,NLCD,everything())
+#df30 <- df1
+#df120 <- df1
 
 # Run riparian calculations
 finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=NA,RWETL1=NA,RSHRB1=NA
@@ -129,8 +123,8 @@ finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=N
                             ,RTotBAR120=NA,RHUM120=NA,RURB120=NA,RMBAR120=NA,RAGT120=NA,RAGP120=NA,RAGC120=NA) 
 for(i in 1:length(wshdList)){
   # Subset nhd streams by each polygon in wshdPolys
-  #testnhd <- nhd[wshdPolys[i,],]
-  testnhd <- nhd[wshdPolys1[i,],]
+  testnhd <- nhd[wshdPolys[i,],] %>%
+    mutate(StationID = wshdPolys[i,]$StationID, Year_ = wshdPolys[i,]$Year_, NLCDyear = wshdPolys[i,]$NLCDyear)
   
   # Assign StationID to line segments pertaining to each polygon StationID
   if(nrow(testnhd)==0){
@@ -138,15 +132,99 @@ for(i in 1:length(wshdList)){
       mutate(StationID=wshdList[i])
     finalRiparian <- rbind(finalRiparian, blank)
   }else{
-    testnhd@data$StationID <- wshdPolys@data$StationID[i]
-    finalRiparian <- rbind(finalRiparian, riparianDataManagment2(i,testnhd))
+    finalRiparian <- rbind(finalRiparian, ripCalc(testnhd, get(paste0('landcover',wshdPolys$NLCDyear[i]))))
   }
   finalRiparian <- finalRiparian[complete.cases(finalRiparian$StationID),]
 }
 
 Result <- merge(landusewide,finalRiparian, by=c('StationID','YearSampled','NLCD'))
 
-write.csv(finalRiparian,paste(saveHere,'finalRiparian.csv',sep=''))
-write.csv(Result,paste(saveHere,'Result1.csv',sep=''))
-rm(landcover2001);rm(landcover2006);rm(landcover2011)#remove raster to increase memory availability
+#write.csv(finalRiparian,paste(saveHere,'finalRiparian.csv',sep=''))
+#write.csv(Result,paste(saveHere,'Result1.csv',sep=''))
+rm(testnhd); rm(finalRiparian)
+rm(landcover2001);rm(landcover2006);rm(landcover2011); rm(landcover2016)#remove raster to increase memory availability
+rm(template);rm(nhd)
+
+
+############################### % Impervious Calculations ##############################################
+
+imperv2001 <- raster(paste0(wd,"/NLCD2001imp.TIF"))
+imperv2006 <- raster(paste0(wd,"/NLCD2006imp.TIF"))
+imperv2011  <- raster(paste0(wd,"/NLCD2011imp.TIF"))
+imperv2016  <- raster(paste0(wd,"/NLCD2016imp.TIF")) 
+
+
+# Set up dataframe to store impervious data
+dfi <- data.frame(matrix(NA, ncol = 105))
+names(dfi) <- c('StationID','YearSampled','NLCD',paste("PCT",c(0:100),sep=""), 'sqMi')
+templatei <- dfi[,4:104]
+
+# Run the impervious
+for(i in 1:length(wshdList)){
+  #l <- imperviousCalc(i)
+  impervious <- impervousCounts(templatei, get(paste0('imperv',wshdPolys$NLCDyear[i])), wshdPolys[i,])
+  
+  dfi <- rbind(dfi,impervious) # must use rbind() instead of df[i,] <- l because l could be multiple rows
+  dfi <- dfi[complete.cases(dfi$StationID),] #remove any placeholder rows
+}
+
+imperviousresults <- imperviousDataManagement(dfi)  
+Result <- left_join(Result,imperviousresults, by=c('StationID','YearSampled','NLCD'))
+#write.csv(imperviousresults,paste(saveHere,'impervious.csv',sep=''))  
+#write.csv(Result,paste(saveHere,'Result5.csv',sep=''))  
+rm(imperv2001); rm(imperv2006); rm(imperv2011);rm(imperv2016); rm(dfi); rm(templatei); rm(impervious); rm(imperviousresults)
+
+
+
+
+###### VA VPDES Calculations
+# Need to rerun Jason's Discoverer query to update layer, Kristy's permit layer is questionable
+vaVPDES <- st_read(paste0(wd, '/vpdesalbers.shp'))
+
+# Dataframe to store permit count data
+vaVPDES1 <- vaVPDES[0,] %>%
+  st_drop_geometry() %>%
+  add_row() %>%
+  mutate(StationID=NA,YearSampled = NA, NLCD = NA)
+
+
+for(i in 1:length(wshdList)){
+  permitCount <- pointCount(vaVPDES, wshdPolys[i,])
+  vaVPDES1 <- rbind(vaVPDES1, permitCount) 
+  vaVPDES1 <- vaVPDES1[complete.cases(vaVPDES1$StationID),] #remove any placeholder rows
+}
+
+permitResult <- VPDESdataManagement(vaVPDES1)
+
+
+# Add to final results
+Result <- left_join(Result,vaVPDES1, by=c('StationID','YearSampled','NLCD'))
+#write.csv(Result,paste(saveHere,'/Result2.csv', sep=''))
+#write.csv(vaVPDES1,paste(saveHere,'/vaVPDES1.csv', sep=''))
+rm(vaVPDES); rm(permitResult); rm(permitCount); rm(vaVPDES1)#remove shapefile to increase memory availability
+
+
+#### Dam Calculations 
+dams <- st_read(paste0(wd,'/dam_albers.shp')) %>%
+  mutate_at(vars(INSP_DATE, SOURC_DATE, SUPP_DATE), as.character) # change date to character format to work with functions
+
+
+# Dataframe to store dam data
+damResult <- dams[0,] %>%
+  st_drop_geometry() %>%
+  add_row() %>%
+  mutate(StationID=NA,YearSampled = NA, NLCD = NA)
+
+for(i in 1:length(wshdList)){
+  damCountresults <- pointCount(dams, wshdPolys[i,])
+  damResult <- rbind(damResult,damCountresults)
+  damResult <- damResult[complete.cases(damResult$StationID),]
+}
+damsummary <- damDataManagement(damResult)
+
+# Add to final results
+Result <- merge(Result,damsummary, by='StationID')
+#write.csv(Result,paste(saveHere,'/Result3.csv', sep=''))
+#write.csv(damsummary,paste(saveHere,'/damsummary.csv', sep=''))
+rm(dams);rm(damsummary); rm(damCountresults); rm(damResult) #remove shapefile to increase memory availability
 

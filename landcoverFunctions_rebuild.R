@@ -1,4 +1,6 @@
-landcoverCounts <- function(landcover, wshdPoly){
+
+
+landcoverCounts <- function(template, landcover, wshdPoly){
   e <- extract(landcover, wshdPoly, small=T, na.rm=F)
   et <- lapply(e,table) %>%
     as.data.frame() %>%
@@ -9,8 +11,9 @@ landcoverCounts <- function(landcover, wshdPoly){
   results <- suppressWarnings(bind_rows(template,et) %>%
                                 mutate_if(is.numeric, ~replace_na(., 0)) %>%
                                 mutate(YearSampled = wshdPoly$Year_,
-                                       NLCD = wshdPoly$NLCDyear) %>%
-                                dplyr::select(StationID, YearSampled, NLCD, everything()) %>%
+                                       NLCD = wshdPoly$NLCDyear,
+                                       sqMi = as.numeric(st_area(wshdPoly)) * 0.00000038610) %>% # area comes out in m^2 so convert to sq miles
+                                dplyr::select(StationID, YearSampled, NLCD, everything(),sqMi) %>%
                                 filter(!(StationID == 'template'))) # drop dummy row
   return(results)
 }
@@ -19,51 +22,56 @@ landcoverCounts <- function(landcover, wshdPoly){
 
 landuseDataManagement <- function(x){ #x is dataframe 
   z <- x %>%
-    group_by(StationID, YearSampled) %>%
+    group_by(StationID, YearSampled, NLCD) %>%
     pivot_longer(cols = starts_with("VALUE_"),names_to = "variable", 
                  values_to = 'value') 
   
   landusewide <- z %>%
-    mutate(acre = 900 * value * 0.0002471053814672,
-           sqMile = acre*0.0015625,
-           hectare = sqMile * 258.9988110336,
-           totalArea_sqMile = sum(sqMile),
+    mutate(sqMile = value * 0.000347492,
+           # Since any cell that is touched by polygon is counted, it is highly likely that the raster
+           # area is larger than the polygon area. Thus, we need to do the raster math (percentages)
+           # with the sq mileage of the rasters as the denominator instead of the polygon sq mileage to avoid
+           # accidentally having percentages over 100%
+           rasterTotalArea_sqMile = sum(sqMile), 
+           totalArea_sqMile = sqMi, # polygon area used for watershed area reported to accurately represent area for trend sites
+           # given thata cells can shift slightly, if watershed area was purely based on cell counts then the area could
+           # change from NLCD release to NLCD release
            Water_sqMile = sum(sqMile[which(variable=='VALUE_11')]),
-           PWater=(Water_sqMile / totalArea_sqMile) *100,
+           PWater=(Water_sqMile / rasterTotalArea_sqMile) *100,
            N_sqMile = sum(sqMile[which(variable %in% c('VALUE_31','VALUE_41','VALUE_42',
                                                        'VALUE_43','VALUE_51','VALUE_51',
                                                        'VALUE_71','VALUE_72','VALUE_73',
                                                        'VALUE_74','VALUE_91','VALUE_95'))]),
-           N_INDEX = (N_sqMile / totalArea_sqMile) * 100,
+           N_INDEX = (N_sqMile / rasterTotalArea_sqMile) * 100,
            Forest_sqMile = sum(sqMile[which(variable %in% c('VALUE_41','VALUE_42','VALUE_43'))]),
-           PFOR = (Forest_sqMile / totalArea_sqMile) * 100,
+           PFOR = (Forest_sqMile / rasterTotalArea_sqMile) * 100,
            Wetland_sqMile = sum(sqMile[which(variable %in% c('VALUE_90','VALUE_95'))]),
-           PWETL = (Wetland_sqMile / totalArea_sqMile) * 100,
+           PWETL = (Wetland_sqMile / rasterTotalArea_sqMile) * 100,
            Shrub_sqMile = sum(sqMile[which(variable %in% c('VALUE_51','VALUE_52'))]),
-           PSHRB = (Shrub_sqMile / totalArea_sqMile) * 100,
+           PSHRB = (Shrub_sqMile / rasterTotalArea_sqMile) * 100,
            Ngrasslands_sqMile = sum(sqMile[which(variable %in% c('VALUE_71','VALUE_72',
                                                                  'VALUE_73','VALUE_74'))]),
-           PNG = (Ngrasslands_sqMile / totalArea_sqMile) * 100,
+           PNG = (Ngrasslands_sqMile / rasterTotalArea_sqMile) * 100,
            Barren_sqMile = sum(sqMile[which(variable =='VALUE_31')]),
-           PBAR = (Barren_sqMile / totalArea_sqMile) * 100,
+           PBAR = (Barren_sqMile / rasterTotalArea_sqMile) * 100,
            TotBarren_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_31'))]),
-           PTotBAR = (TotBarren_sqMile / totalArea_sqMile) * 100,
+           PTotBAR = (TotBarren_sqMile / rasterTotalArea_sqMile) * 100,
            U_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_22','VALUE_23',
                                                        'VALUE_24','VALUE_81','VALUE_82'))]),
-           U_INDEX = (U_sqMile / totalArea_sqMile) * 100,
+           U_INDEX = (U_sqMile / rasterTotalArea_sqMile) * 100,
            Urban_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_22',
                                                            'VALUE_23','VALUE_24'))]),
-           PURB = (Urban_sqMile / totalArea_sqMile) * 100,
+           PURB = (Urban_sqMile / rasterTotalArea_sqMile) * 100,
            MBAR_sqMile = sum(sqMile[which(variable == 'VALUE_21')]),
-           PMBAR = (MBAR_sqMile / totalArea_sqMile) * 100,
+           PMBAR = (MBAR_sqMile / rasterTotalArea_sqMile) * 100,
            AGT_sqMile = sum(sqMile[which(variable %in% c('VALUE_81','VALUE_82'))]),
-           PAGT = (AGT_sqMile / totalArea_sqMile) * 100,
+           PAGT = (AGT_sqMile / rasterTotalArea_sqMile) * 100,
            AGP_sqMile = sum(sqMile[which(variable == 'VALUE_81')]),
-           PAGP = (AGP_sqMile / totalArea_sqMile) * 100,
+           PAGP = (AGP_sqMile / rasterTotalArea_sqMile) * 100,
            AGC_sqMile = sum(sqMile[which(variable == 'VALUE_82')]),
-           PAGC = (AGC_sqMile / totalArea_sqMile) * 100) %>%
+           PAGC = (AGC_sqMile / rasterTotalArea_sqMile) * 100) %>%
     distinct(StationID, YearSampled, NLCD, .keep_all = T) %>%
-    dplyr::select(StationID, YearSampled, totalArea_sqMile, PWater, N_INDEX, PFOR, PWETL, 
+    dplyr::select(StationID, YearSampled, NLCD, totalArea_sqMile, PWater, N_INDEX, PFOR, PWETL, 
                   PSHRB, PNG, PBAR, PTotBAR, U_INDEX, PURB, PMBAR, PAGT, PAGP, PAGC)
   
   diversity <- z %>% # still grouped on StationID and Year
@@ -76,7 +84,7 @@ landuseDataManagement <- function(x){ #x is dataframe
             P_i2_1 = (value / Psum) ^2,
             P_i_ln = sum(P_i_ln_1, na.rm = T),
             P_i2 = sum(P_i2_1, na.rm = T)) %>%
-    distinct(StationID, YearSampled, .keep_all = T) %>%
+    distinct(StationID, YearSampled, NLCD, .keep_all = T) %>%
     mutate(S = m,
            H = -(P_i_ln),
            Hprime = H / log(S),
@@ -84,199 +92,184 @@ landuseDataManagement <- function(x){ #x is dataframe
     dplyr::select(StationID, YearSampled, NLCD, S, H, Hprime, C) 
   
   # Join back landusewide data
-  Result <- left_join(landusewide, diversity, by = c('StationID', 'YearSampled')) %>%
+  Result <- left_join(landusewide, diversity, by = c('StationID', 'YearSampled', 'NLCD')) %>%
     dplyr::select(StationID,YearSampled,NLCD,everything())
   
   return(Result)}
   
   
   
+riparianDataManagement <- function(x){ #x is dataframe 
+  z <- x %>%
+    group_by(StationID, YearSampled, NLCD, bufferWidth) %>%
+    pivot_longer(cols = starts_with("VALUE_"),names_to = "variable", 
+                 values_to = 'value') 
+  
+  landusewide <- z %>%
+    mutate(sqMile = value * 0.000347492,
+           # total area needs to be calculated slightly differently for riparian because any cells
+           # touched by the buffer are included, which makes it quite easy to have value areas larger
+           # than the input buffer polygon area
+           rasterTotalArea_sqMile = sum(sqMile), # old way of calculating total area of watershed but if cells shift then gets wonky for trend sites
+           N_sqMile = sum(sqMile[which(variable %in% c('VALUE_31','VALUE_41','VALUE_42',
+                                                       'VALUE_43','VALUE_51','VALUE_51',
+                                                       'VALUE_71','VALUE_72','VALUE_73',
+                                                       'VALUE_74','VALUE_91','VALUE_95'))]),
+           RNAT = (N_sqMile / rasterTotalArea_sqMile) * 100,
+           Forest_sqMile = sum(sqMile[which(variable %in% c('VALUE_41','VALUE_42','VALUE_43'))]),
+           RFOR = (Forest_sqMile / rasterTotalArea_sqMile) * 100,
+           Wetland_sqMile = sum(sqMile[which(variable %in% c('VALUE_90','VALUE_95'))]),
+           RWETL = (Wetland_sqMile / rasterTotalArea_sqMile) * 100,
+           Shrub_sqMile = sum(sqMile[which(variable %in% c('VALUE_51','VALUE_52'))]),
+           RSHRB = (Shrub_sqMile / rasterTotalArea_sqMile) * 100,
+           Ngrasslands_sqMile = sum(sqMile[which(variable %in% c('VALUE_71','VALUE_72',
+                                                                 'VALUE_73','VALUE_74'))]),
+           RNG = (Ngrasslands_sqMile / rasterTotalArea_sqMile) * 100,
+           Barren_sqMile = sum(sqMile[which(variable =='VALUE_31')]),
+           RBAR = (Barren_sqMile / rasterTotalArea_sqMile) * 100,
+           TotBarren_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_31'))]),
+           RTotBAR = (TotBarren_sqMile / rasterTotalArea_sqMile) * 100,
+           U_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_22','VALUE_23',
+                                                       'VALUE_24','VALUE_81','VALUE_82'))]),
+           RHUM = (U_sqMile / rasterTotalArea_sqMile) * 100,
+           Urban_sqMile = sum(sqMile[which(variable %in% c('VALUE_21','VALUE_22',
+                                                           'VALUE_23','VALUE_24'))]),
+           RURB = (Urban_sqMile / rasterTotalArea_sqMile) * 100,
+           MBAR_sqMile = sum(sqMile[which(variable == 'VALUE_21')]),
+           RMBAR = (MBAR_sqMile / rasterTotalArea_sqMile) * 100,
+           AGT_sqMile = sum(sqMile[which(variable %in% c('VALUE_81','VALUE_82'))]),
+           RAGT = (AGT_sqMile / rasterTotalArea_sqMile) * 100,
+           AGP_sqMile = sum(sqMile[which(variable == 'VALUE_81')]),
+           RAGP = (AGP_sqMile / rasterTotalArea_sqMile) * 100,
+           AGC_sqMile = sum(sqMile[which(variable == 'VALUE_82')]),
+           RAGC = (AGC_sqMile / rasterTotalArea_sqMile) * 100) %>%
+    distinct(StationID, YearSampled, NLCD, bufferWidth, .keep_all = T) %>%
+    dplyr::select(StationID, YearSampled, NLCD, bufferWidth, RNAT, RFOR, RWETL, 
+                  RSHRB, RNG, RBAR, RTotBAR, RHUM, RURB, RMBAR, RAGT, RAGP, RAGC) %>%
+    # add buffer distance to variable name
+    pivot_longer(cols = starts_with("R"), names_to = "variable", values_to = "percent") %>%
+    mutate(finalVarName = paste0(variable,bufferWidth)) %>%
+    ungroup() %>%
+    group_by(StationID, YearSampled, NLCD) %>%
+    dplyr::select(-c(variable, bufferWidth)) %>%
+    pivot_wider(names_from = 'finalVarName', values_from = 'percent') %>%
+    ungroup()
+  
+  return(landusewide)}
   
   
   
   
-  
-  
-  
-  
-  
-  
-  
-  
-ripCalc <- function(x,y){
+
+ripCalc <- function(testnhd, landcover){
   # Buffer just the stream segments in selected watershed
-  buffer <- gBuffer(testnhd, width=y)
-  years <- subset(criticalLink,StationID %in% wshdPolys[x,]$StationID)%>%
-    mutate(year=ifelse(!is.na(Year_),Year_,2011)# get rid of NA's, replace with 2011 for now bc most recent NLCD release
-           ,NLCDyear=ifelse(year>2000&year<2004,2001,ifelse(year>=2004&year<2009,2006,2011)))#relabel based on possible NLCD releases
-  if(nrow(years)==0){# make up a fake df for years if there is not matching entry for wshdPolys$StationID in Jason's db
-    years <- data.frame(sampleID=wshdPolys[x,]$StationID,strahler_order=NA,Longitude_DD=NA
-                        ,Latitude_DD=NA,Year_=NA,StationID=wshdPolys[x,]$StationID,year=2011,NLCDyear=2011)}
-  if(length(unique(years$NLCDyear))==1){# this means only one NLCD year needs to be run
-    landcover <- if(unique(years$NLCDyear)==2001){landcover2001}else{if(unique(years$NLCDyear)==2006){landcover2006}else{landcover2011}}
-    e = extract(landcover, buffer,small=T, na.rm=F)
-    et = lapply(e,table)
-    if(!length(et[[1]])==0){ 
-      t <- melt(et)
-      t.cast <- cast(t, L1 ~ Var.1, sum)
-      names(t.cast)[1] <- "StationID"
-      t.cast[1,1] <- wshdList[x]
-      print(paste(wshdList[x],'Buffer Distance =',y,'m',sep=' '))
-      colnames(t.cast)[2:length(names(t.cast))] <- paste("VALUE_",colnames(t.cast)
-                                                         [2:length(names(t.cast))], sep = "")}
-    if(length(et[[1]])==0){ 
-      t.cast <- data.frame(wshdPolys[x,]@data[1])
-      rownames(t.cast) <- 1
-      t.cast$VALUE_11= 0
-      print(paste(wshdList[x],'Buffer Distance =',y,'m',sep=' '))}
-    zeros = template[is.na(match(names(template), names(t.cast)))]
-    results = data.frame(t.cast, zeros)
-    results <- results[,order(names(results))]%>%
-      mutate(NLCD=unique(years$NLCDyear))
-    if(nrow(years)>1){# now deal with if more than 1 sample in that NLCD year
-      results <- results[rep(seq_len(nrow(results)), each=nrow(years)),]
-      results$YearSampled <- ifelse(is.na(years$Year_),years$Year_,years$year)
-      row.names(results) <- 1:nrow(results) #change row.names
-      results <- select(results,StationID,YearSampled,NLCD,everything())
-    }else(#if only one row(year) just need to add on YearSampled
-      results <- mutate(results,YearSampled=ifelse(is.na(years$Year_[1]),years$Year_[1],years$year[1]))%>%#correct for defaulting Year_=2011 when NA)%>%
-        select(StationID,YearSampled,NLCD,everything()))
-  }else{# this means more than 1 NLCD year needs to be run, must loop through them
-    results <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA)%>%select(StationID,YearSampled,NLCD,everything())
-    nNLCDyears <- aggregate(data.frame(count=years[,8]),list(NLCDyrs=years[,8]),length)
-    for(b in 1:nrow(nNLCDyears)){
-      landcover <- if(nNLCDyears[b,1]==2001){landcover2001}else{if(nNLCDyears[b,1]==2006){landcover2006}else{landcover2011}}
-      e = extract(landcover, buffer,small=T, na.rm=F)
-      et = lapply(e,table)
-      if(!length(et[[1]])==0){ 
-        t <- melt(et)
-        t.cast <- cast(t, L1 ~ Var.1, sum)
-        print(paste(wshdList[x],'Buffer Distance =',y,'m','; NLCD Year=',nNLCDyears[b,1],sep=' '))
-        names(t.cast)[1] <- "StationID"
-        t.cast[1,1] <- wshdList[x]
-        colnames(t.cast)[2:length(names(t.cast))] <- paste("VALUE_",colnames(t.cast)
-                                                           [2:length(names(t.cast))], sep = "")}
-      if(length(et[[1]])==0){ 
-        t.cast <- data.frame(wshdPolys[x,]@data[1])
-        rownames(t.cast) <- 1
-        t.cast$VALUE_11= 0
-        print(paste(wshdList[x],'Buffer Distance =',y,'m','; NLCD Year=',nNLCDyears[b,1],sep=' '))}
-      zeros <- template[is.na(match(names(template), names(t.cast)))]
-      results_ <- data.frame(t.cast, zeros)
-      results_ <- results_[,order(names(results_))]%>%
-        mutate(NLCD=nNLCDyears[b,1])
-      if(nNLCDyears$count[b]>1){# now deal with if more than 1 sample in that NLCD year
-        results_ <- results_[rep(seq_len(nrow(results_)), each=nNLCDyears$count[b]),]
-        step1 <- subset(years,NLCDyear %in% nNLCDyears[b,1])
-        results_$YearSampled <- ifelse(is.na(step1$Year_),step1$Year_,step1$year)
-        row.names(results_) <- 1:nrow(results_) #change row.names
-        results_ <- select(results_,StationID,YearSampled,NLCD,everything())
-      }else{#if only one row(year) just need to add on YearSampled
-        step1 <- subset(years,NLCDyear %in% nNLCDyears[b,1])
-        results_ <- mutate(results_,YearSampled=ifelse(is.na(step1$Year_),step1$Year_,step1$year))%>%
-          select(StationID,YearSampled,NLCD,everything())}
-      results <- rbind(results,results_)
-    }
-  }
-  results <- results[complete.cases(results$StationID),] #remove any placeholder rows
+  riparianLanduse <- landcoverCounts(template, landcover, st_buffer(testnhd, dist = 1)) %>%
+    mutate(bufferWidth = 1) %>%
+    bind_rows( landcoverCounts(landcover, st_buffer(testnhd, dist = 30)) %>%
+                 mutate(bufferWidth = 30) ) %>% 
+    bind_rows( landcoverCounts(landcover, st_buffer(testnhd, dist = 120)) %>%
+                 mutate(bufferWidth = 120) )
+  riparianDataManagement(riparianLanduse)
+}
+  
+
+impervousCounts <- function(template, landcover, wshdPoly){
+  e <- extract(landcover, wshdPoly, small=T, na.rm=F)
+  et <- lapply(e,table) %>%
+    as.data.frame() %>%
+    mutate(StationID = wshdPoly$StationID,
+           colNames = paste0('PCT',Var1)) %>% # rename so dont start column name with a number
+    dplyr::select(-Var1) %>% # drop column so it won't mess things up going wide
+    pivot_wider(names_from = colNames, values_from = Freq) 
+  results <- suppressWarnings(bind_rows(template,et) %>%
+                                mutate_if(is.numeric, ~replace_na(., 0)) %>%
+                                mutate(YearSampled = wshdPoly$Year_,
+                                       NLCD = wshdPoly$NLCDyear,
+                                       sqMi = as.numeric(st_area(wshdPoly)) * 0.00000038610) %>% # area comes out in m^2 so convert to sq miles
+                                dplyr::select(StationID, YearSampled, NLCD, everything(),sqMi) %>%
+                                filter(!(StationID == 'template'))) # drop dummy row
   return(results)
+} 
+
+
+
+
+impervious <- impervousCounts(templatei, landcover, wshdPoly)
+  
+
+
+imperviousDataManagement <- function(x){# x is a df
+  x %>%
+    group_by(StationID, YearSampled, NLCD,sqMi) %>%
+    pivot_longer(cols = starts_with("PCT"),names_to = "variable", 
+                 values_to = 'value') %>%
+    mutate(#sqMile = 900*value*0.0002471053814672*0.0015625, 
+           sqMile = value * 0.000347492,
+           PCT = as.numeric(substr(variable, 4,length(variable))), 
+           sqMileImp=sqMile*(PCT/100)) %>%
+    summarize(totalArea_sqMile=sum(sqMile, na.rm = T),
+              sqMileImp=sum(sqMileImp, na.rm = T)) %>%
+    mutate(wshdImpPCT = (sqMileImp / totalArea_sqMile) * 100) %>%
+    dplyr::select(-c(sqMi, totalArea_sqMile)) %>%
+    ungroup()
+}
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+pointCount <- function(pointFile, polygonFile){
+  s <- pointFile[polygonFile,] %>%
+    st_drop_geometry()
+  # if no points found then make a dummy row
+  if(nrow(s)==0){ suppressWarnings(s[1,] <- 0) }
+  s <- mutate(s, StationID=polygonFile$StationID,
+              YearSampled = polygonFile$Year_,
+              NLCD = polygonFile$NLCD)
+  return(s)
 }
 
-riparianDataManagment <- function(x,y){ 
-  rip <- ripCalc(x,y)
-  rip.wide <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT=NA,RFOR=NA,RWETL=NA
-                         ,RSHRB=NA,RNG=NA,RBAR=NA,RTotBAR=NA,RHUM=NA,RURB=NA,RMBAR=NA
-                         ,RAGT=NA,RAGP=NA,RAGC=NA)  
-  for(z in 1:nrow(rip)){
-    rip0.5 <- rip[z,1:3] # save year sampled and NLCD year info
-    rip0 <- melt(rip[z,c(1,4:18)], 'StationID')
-    rip1 <- mutate(rip0, acre=900*value*0.0002471053814672,sqMile=acre*0.0015625
-                   ,hectare=sqMile*258.9988110336)
-    rip2 <- summarise(rip1,StationID=wshdList[x],totalArea_sqMile=sum(sqMile))
-    rip3 <- merge(rip1,rip2, by='StationID')
-    rip4 <- ddply(rip3,c('StationID','variable'),mutate
-                  ,N_sqMile=sum(sqMile[(variable=='VALUE_31')|(variable=='VALUE_41')
-                                       |(variable=='VALUE_42')|(variable=='VALUE_43')
-                                       |(variable=='VALUE_51')|(variable=='VALUE_52')
-                                       |(variable=='VALUE_71')|(variable=='VALUE_72')
-                                       |(variable=='VALUE_73')|(variable=='VALUE_74')
-                                       |(variable=='VALUE_91')|(variable=='VALUE_95')])
-                  ,RNAT=(N_sqMile/totalArea_sqMile)*100
-                  ,Forest_sqMile=sum(sqMile[(variable=='VALUE_41')|(variable=='VALUE_42')
-                                            |(variable=='VALUE_43')])
-                  ,RFOR=(sum(Forest_sqMile)/totalArea_sqMile)*100
-                  ,Wetland_sqMile=sum(sqMile[(variable=='VALUE_90')|(variable=='VALUE_95')])
-                  ,RWETL=(Wetland_sqMile/totalArea_sqMile)*100
-                  ,Shrub_sqMile=sum(sqMile[(variable=='VALUE_51')|(variable=='VALUE_52')])
-                  ,RSHRB=(Shrub_sqMile/totalArea_sqMile)*100
-                  ,Ngrasslands_sqMile=sum(sqMile[(variable=='VALUE_71')|(variable=='VALUE_72')
-                                                 |(variable=='VALUE_73')|(variable=='VALUE_74')])
-                  ,RNG=(Ngrasslands_sqMile/totalArea_sqMile)*100
-                  ,Barren_sqMile=sum(sqMile[(variable=='VALUE_31')])
-                  ,RBAR=(Barren_sqMile/totalArea_sqMile)*100
-                  ,TotBarren_sqMile=sum(sqMile[(variable=='VALUE_21')|(variable=='VALUE_31')])
-                  ,RTotBAR=(TotBarren_sqMile/totalArea_sqMile)*100
-                  ,U_sqMile=sum(sqMile[(variable=='VALUE_21')|(variable=='VALUE_22')
-                                       |(variable=='VALUE_23')|(variable=='VALUE_24')
-                                       |(variable=='VALUE_81')|(variable=='VALUE_82')])
-                  ,RHUM=(U_sqMile/totalArea_sqMile)*100
-                  ,Urban_sqMile=sum(sqMile[(variable=='VALUE_21')|(variable=='VALUE_22')
-                                           |(variable=='VALUE_23')|(variable=='VALUE_24')])
-                  ,RURB=(Urban_sqMile/totalArea_sqMile)*100
-                  ,MBAR_sqMile=sum(sqMile[(variable=='VALUE_21')])
-                  ,RMBAR=(MBAR_sqMile/totalArea_sqMile)*100
-                  ,AGT_sqMile=sum(sqMile[(variable=='VALUE_81')|(variable=='VALUE_82')])
-                  ,RAGT=(AGT_sqMile/totalArea_sqMile)*100
-                  ,AGP_sqMile=sum(sqMile[(variable=='VALUE_81')])
-                  ,RAGP=(AGP_sqMile/totalArea_sqMile)*100
-                  ,AGC_sqMile=sum(sqMile[(variable=='VALUE_82')])
-                  ,RAGC=(AGC_sqMile/totalArea_sqMile)*100)
-    rip.long <- melt(rip4,id.vars=c('StationID')
-                     ,measure.vars=c('RNAT','RFOR','RWETL','RSHRB','RNG','RBAR','RTotBAR','RHUM'
-                                     ,'RURB','RMBAR','RAGT','RAGP','RAGC'))
-    rip.wide_ <- dcast(rip.long,StationID~variable,value.var='value',sum)%>%
-      merge(rip0.5,by='StationID')%>%select(StationID,YearSampled,NLCD,everything())
-    rip.wide <- rbind(rip.wide,rip.wide_)
-  }
-  rip.wide <- rip.wide[complete.cases(rip.wide$StationID),]
-  return(rip.wide)
-}
-
-riparianDataManagment2 <- function(x){
-  df1 <- riparianDataManagment(x,1)
-  colnames(df1)[4:length(names(df1))] <- paste(colnames(df1)[4:length(names(df1))],"1", sep = "")
-  df30 <- riparianDataManagment(x,30)
-  colnames(df30)[4:length(names(df30))] <- paste(colnames(df30)[4:length(names(df30))],"30", sep = "")
-  df120 <- riparianDataManagment(x,120)
-  colnames(df120)[4:length(names(df120))] <- paste(colnames(df120)[4:length(names(df120))],"120", sep = "")
-  riparianlanduse <- join_all(list(df1,df30,df120), by=c('StationID','YearSampled','NLCD'))
-}
+pointCount(vaVPDES, wshdPolys[2,])
+pointCount(dams, wshdPolys[2,])
 
 
 
-permitCount <- function(x){
-  s <- vaVPDES[wshdPolys[x,],]
-  if(!nrow(s@data)==0){
-    vaVPDESselect <- as.data.frame(s)
-    vaVPDESselect <- mutate(vaVPDESselect, StationID=wshdPolys@data$StationID[x])}
-  if(nrow(s@data)==0){
-    vaVPDESselect <- vaVPDEStemplate
-    vaVPDESselect$StationID <- wshdPolys@data$StationID[x]}
-  vaVPDES1 <- rbind(vaVPDEStemplate,vaVPDESselect)
-  vaVPDES1 <- vaVPDES1[complete.cases(vaVPDES1$StationID),]
-  return(vaVPDES1)
-}
 
 VPDESdataManagement <- function(x){# x is a dataframe
   # Mark permits according to classification
   vaVPDES2 <- mutate(x,MunMajor=ifelse(c(MAJOR__MIN=='Major'&MUNICIPAL_=='Municipal'),1,0)
                      ,MunMinor=ifelse(c(MAJOR__MIN=='Minor'& MUNICIPAL_=='Municipal'),1,0)
                      ,IndMajor=ifelse(c(MAJOR__MIN=='Major'&MUNICIPAL_=='Industrial'),1,0)
-                     ,IndMinor=ifelse(c(MAJOR__MIN=='Minor'&MUNICIPAL_=='Industrial'),1,0))
-  vaVPDES2[is.na(vaVPDES2)] <- 0 # make 0 to enable subsequent sum function
+                     ,IndMinor=ifelse(c(MAJOR__MIN=='Minor'&MUNICIPAL_=='Industrial'),1,0)) 
+  suppressWarnings(vaVPDES2[is.na(vaVPDES2)] <- 0) # make 0 to enable subsequent sum function
   # Sum all permit types based on StationID
-  vaVPDES3 <- ddply(vaVPDES2,'StationID',summarise,MunMajor=sum(MunMajor)
-                    ,MunMinor=sum(MunMinor),IndMajor=sum(IndMajor),IndMinor=sum(IndMinor))}
+  vaVPDES2 %>%
+    group_by(StationID, YearSampled, NLCD) %>%
+    summarize(MunMajor=sum(MunMajor),
+              MunMinor=sum(MunMinor),
+              IndMajor=sum(IndMajor),
+              IndMinor=sum(IndMinor)) %>%
+    ungroup()}
+            
+
+damDataManagement <- function(x){#x is a dataframe
+  x %>%
+    group_by(StationID, YearSampled, NLCD) %>%
+    mutate(dam = ifelse(NID_HEIGHT == 0, 0, 1)) %>%
+    summarize(damcount = sum(dam)) %>%
+    ungroup() }
 
 
 
