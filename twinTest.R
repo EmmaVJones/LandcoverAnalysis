@@ -87,6 +87,7 @@ template <- tibble(StationID = 'template', VALUE_11=0,VALUE_21=0,VALUE_22=0, VAL
                        ,VALUE_31=0,VALUE_41=0,VALUE_42=0,VALUE_43=0,VALUE_52=0,VALUE_71=0
                        ,VALUE_81=0,VALUE_82=0,VALUE_90=0,VALUE_95=0)
 
+
 # Run the functions
 df <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA, sqMi=NA)%>%
   dplyr::select(StationID,YearSampled,NLCD,everything(), sqMi)
@@ -105,14 +106,8 @@ rm(l); rm(df)
 
 #### RIPARIAN CALCULATIONS 
 # Bring in NHD polyline file
-#nhd <- readOGR(wd,'nhd_83albers')
 nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
 
-# Set up dataframes to store riparian landcover data
-#df1 <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA) %>% 
-#  dplyr::select(StationID,YearSampled,NLCD,everything())
-#df30 <- df1
-#df120 <- df1
 
 # Run riparian calculations
 finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=NA,RWETL1=NA,RSHRB1=NA
@@ -121,6 +116,7 @@ finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=N
                             ,RTotBAR30=NA,RHUM30=NA,RURB30=NA,RMBAR30=NA,RAGT30=NA,RAGP30=NA,RAGC30=NA
                             ,RNAT120=NA,RFOR120=NA,RWETL120=NA,RSHRB120=NA,RNG120=NA,RBAR120=NA
                             ,RTotBAR120=NA,RHUM120=NA,RURB120=NA,RMBAR120=NA,RAGT120=NA,RAGP120=NA,RAGC120=NA) 
+
 for(i in 1:length(wshdList)){
   # Subset nhd streams by each polygon in wshdPolys
   testnhd <- nhd[wshdPolys[i,],] %>%
@@ -227,4 +223,27 @@ Result <- merge(Result,damsummary, by='StationID')
 #write.csv(Result,paste(saveHere,'/Result3.csv', sep=''))
 #write.csv(damsummary,paste(saveHere,'/damsummary.csv', sep=''))
 rm(dams);rm(damsummary); rm(damCountresults); rm(damResult) #remove shapefile to increase memory availability
+
+
+
+
+######## Stream Length & Density Calculations 
+# Bring in NHD polyline file
+nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
+
+streams <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,STRMLEN=NA,STRMDENS=NA)
+
+for(i in 1:length(wshdPolys)){
+  print(i)
+  streams1 <- streamCalcs(i)
+  streams <- rbind(streams,streams1)
+  streams <- streams[complete.cases(streams$StationID),]
+}
+
+# Add to final results
+streams$StationID <- as.factor(streams$StationID)
+Result <- join(Result,streams, by=c('StationID','YearSampled','NLCD'))
+write.csv(streams,paste(saveHere,'/streams.csv', sep=''))
+write.csv(Result,paste(saveHere,'/Results4.csv', sep=''))
+rm(nhd)
 

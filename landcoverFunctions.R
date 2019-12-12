@@ -374,7 +374,7 @@ imperviousCalc <- function(x){
     e <- extract(impervious, wshdPolys[x,],small=T, na.rm=F)
     et <- lapply(e,table)
     t <- melt(et)
-    t.cast <- dcast(t, L1 ~ Var.1, sum)
+    t.cast <- dcast(t, L1 ~ Var1, sum)
     names(t.cast)[1] <- "StationID"
     print(t.cast[1,1] <- wshdList[x])
     colnames(t.cast)[2:length(names(t.cast))] <- paste("PCT",colnames(t.cast)

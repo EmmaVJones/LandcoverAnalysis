@@ -139,3 +139,29 @@ write.csv(finalRiparian,paste(saveHere,'finalRiparian.csv',sep=''))
 write.csv(Result,paste(saveHere,'Result1.csv',sep=''))
 rm(landcover2001);rm(landcover2006);rm(landcover2011)#remove raster to increase memory availability
 
+
+
+
+############################### % Impervious Calculations ##############################################
+
+imperv2001 <- raster(paste(wd,"/NLCD2001imp.TIF",sep=""))
+imperv2006 <- raster(paste(wd,"/NLCD2006imp.TIF",sep=""))
+imperv2011  <- raster(paste(wd,"/NLCD2011imp.TIF",sep=""))
+
+
+# Set up dataframe to store impervious data
+dfi <- data.frame(matrix(NA, ncol = 104))
+names(dfi) <- c('StationID','YearSampled','NLCD',paste("PCT",c(0:100),sep=""))
+templatei <- dfi[,4:104]
+
+# Run the impervious
+for(i in 1:length(wshdPolys)){
+  l <- imperviousCalc(i)
+  dfi <- rbind(dfi,l) # must use rbind() instead of df[i,] <- l because l could be multiple rows
+  dfi <- dfi[complete.cases(dfi$StationID),] #remove any placeholder rows
+}
+
+imperviousresults <- imperviousDataManagement(dfi)  
+Result <- merge(Result,imperviousresults, by=c('StationID','YearSampled','NLCD'))
+write.csv(imperviousresults,paste(saveHere,'impervious.csv',sep=''))  
+write.csv(Result,paste(saveHere,'Result5.csv',sep=''))  
