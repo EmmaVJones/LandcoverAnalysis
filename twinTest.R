@@ -38,7 +38,7 @@ wshdSites <- st_read('GISdata/AllStations_through2016.shp') %>%
   filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94")) %>%
   dplyr::select(StationID)
 #wshdList <- as.character(wshdPolys$StationID)
-siteList <- as.character(wshdSites$StationID)
+#siteList <- as.character(wshdSites$StationID)
 
 
 wshdPolys <- st_read('GISdata/EmmaMessAround/TwinWatersheds.shp')
@@ -233,17 +233,48 @@ nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
 
 streams <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,STRMLEN=NA,STRMDENS=NA)
 
-for(i in 1:length(wshdPolys)){
-  print(i)
-  streams1 <- streamCalcs(i)
+for(i in 1:length(wshdList)){
+  testnhd <- nhd[wshdPolys[i,],] 
+  streams1 <- streamCalcs(testnhd, wshdPolys[i,])
   streams <- rbind(streams,streams1)
   streams <- streams[complete.cases(streams$StationID),]
 }
 
 # Add to final results
-streams$StationID <- as.factor(streams$StationID)
-Result <- join(Result,streams, by=c('StationID','YearSampled','NLCD'))
-write.csv(streams,paste(saveHere,'/streams.csv', sep=''))
-write.csv(Result,paste(saveHere,'/Results4.csv', sep=''))
-rm(nhd)
+Result <- left_join(Result,streams, by=c('StationID','YearSampled','NLCD'))
+#write.csv(streams,paste(saveHere,'/streams.csv', sep=''))
+#write.csv(Result,paste(saveHere,'/Results4.csv', sep=''))
+rm(nhd); rm(streams); rm(streams1)
 
+
+
+
+
+######## Elevation Calculations 
+DEM <- raster(paste(wd,'/vaelevation.TIF',sep=''))
+# Set up dataframe to store elevation data
+elev <- data.frame(StationID=NA,ELEVMIN=NA,ELEVMAX=NA,ELEVMEAN=NA,ELEVSD=NA,ELEVRANGE=NA)
+
+elevationCalcs <- function(x){
+  print(paste(x,wshdPolys@data$StationID[x],sep=' '))
+  e <-  extract(DEM, wshdPolys[x,],small=T, na.rm=F) 
+  ELEVMIN <- as.numeric(sapply(e, FUN=min, na.rm=T))
+  ELEVMAX <- as.numeric(sapply(e, FUN=max, na.rm=T))
+  ELEVMEAN <- as.numeric(sapply(e, FUN=mean, na.rm=T))
+  ELEVSD <- as.numeric(sapply(e, FUN=sd, na.rm=T))
+  s <- data.frame(StationID=wshdPolys@data$StationID[x])%>%
+    mutate(ELEVMIN=ELEVMIN,ELEVMAX=ELEVMAX,ELEVMEAN=ELEVMEAN,ELEVSD=ELEVSD,ELEVRANGE=ELEVMAX-ELEVMIN)
+  return(s)
+}
+
+for(i in 1:length(wshdList)){ 
+  e <- elevationCalcs(i)
+  elev <- rbind(elev,e)
+  elev <- elev[complete.cases(elev$StationID),]
+}
+
+# Add to final results
+Result <- merge(Result,elev, by=c('StationID'))
+write.csv(elev,paste(saveHere,'/elev.csv', sep=''))
+write.csv(Result,paste(saveHere,'/Results6.csv', sep=''))
+rm(DEM)
