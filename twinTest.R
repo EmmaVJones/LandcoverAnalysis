@@ -355,3 +355,29 @@ Result <- merge(Result,slp, by='StationID')  # only join on StationID bc elevati
 #write.csv(Result,paste(saveHere,'/Results7.csv', sep=''))
 rm(slope); rm(wshdPolyOptions); rm(slp); rm(e)
 
+
+
+####### Rainfall Calculations 
+# Bring in rainfall raster
+rainfall <- raster(paste(wd,'/rainfall21.TIF',sep=''))
+# Set up dataframe to store rainfall data
+rain <- data.frame(StationID=NA,wshdRain_mmyr=NA,siteRain_mmyr=NA,wshdRain_inyr=NA,siteRain_inyr=NA)
+
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  wshdPointOptions <- filter(wshdSites, StationID %in% uniqueWshdList[i])
+  
+  e <- rainfallCalc(rainfall, wshdPolyOptions[1,], wshdPointOptions[1,])
+  rain <- rbind(rain,e)
+  rain <- rain[complete.cases(rain$StationID),]
+}
+
+
+# Add to final results
+Result <- merge(Result,rain, by='StationID')  # only join on StationID bc elevation data same for all years
+#write.csv(rain,paste(saveHere,'/rain.csv', sep=''))
+#write.csv(Result,paste(saveHere,'/Result8.csv', sep=''))
+rm(rainfall); rm(wshdPolyOptions); rm(wshdPointOptions); rm(rain); rm(e)#remove raster to increase memory availability
+

@@ -291,7 +291,17 @@ areaCalcs <- function(rasterLayer, wshdPoly, varName){
   return(df)
 }
     
- 
+
+rainfallCalc <- function(rasterLayer, wshdPoly, wshdPoint){
+  e_poly <- extract(rasterLayer, wshdPoly, small=T, na.rm=F)
+  e_point <- extract(rasterLayer, wshdPoint, small=T, na.rm=F)
+  
+  data.frame(StationID = wshdPoly$StationID) %>%
+    mutate(wshdRain_mmyr = as.numeric((sapply(e_poly,sum)/100)),
+           siteRain_mmyr = as.numeric((sapply(e_point,sum)/100)),
+           wshdRain_inyr = wshdRain_mmyr * 0.0393701,
+           siteRain_inyr = siteRain_mmyr * 0.0393701)
+}
 
 
 
