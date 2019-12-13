@@ -276,22 +276,24 @@ streamCalcs <- function(testnhd, wshdPoly){
 
 
 
-
-
-
-
-
-slopeCalcs <- function(x){
-  print(paste(x,wshdPolys@data$StationID[x],sep=' '))
-  e <-  extract(slope, wshdPolys[x,],small=T, na.rm=F) 
-  SLPMIN <- as.numeric(sapply(e, FUN=min, na.rm=T))
-  SLPMAX <- as.numeric(sapply(e, FUN=max, na.rm=T))
-  SLPMEAN <- as.numeric(sapply(e, FUN=mean, na.rm=T))
-  SLPSD <- as.numeric(sapply(e, FUN=sd, na.rm=T))
-  t <- data.frame(StationID=wshdPolys@data$StationID[x])%>%
-    mutate(SLPMIN=SLPMIN,SLPMAX=SLPMAX,SLPMEAN=SLPMEAN,SLPSD=SLPSD,SLPRANGE=SLPMAX-SLPMIN)
-  return(t)
+areaCalcs <- function(rasterLayer, wshdPoly, varName){
+  e <- extract(rasterLayer, wshdPoly, small=T, na.rm=F)
+  
+  df <- data.frame(StationID=wshdPoly$StationID) %>%
+    mutate(MIN = as.numeric(sapply(e, FUN=min, na.rm=T)),
+           MAX = as.numeric(sapply(e, FUN=max, na.rm=T)),
+           MEAN = as.numeric(sapply(e, FUN=mean, na.rm=T)),
+           SD = as.numeric(sapply(e, FUN=sd, na.rm=T)),
+           RANGE = MAX - MIN) 
+  # fix names based on variable testing
+  names(df)[2:length(df)] <- paste0(varName,names(df)[2:length(df)])
+  
+  return(df)
 }
+    
+ 
+
+
 
 
 

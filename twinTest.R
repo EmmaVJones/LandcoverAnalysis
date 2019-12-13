@@ -180,7 +180,7 @@ Result <- left_join(landusewide,finalRiparian, by=c('StationID','YearSampled','N
 #write.csv(Result,paste(saveHere,'Result1.csv',sep=''))
 rm(testnhd); rm(finalRiparian)
 rm(landcover2001);rm(landcover2006);rm(landcover2011); rm(landcover2016)#remove raster to increase memory availability
-rm(template);rm(nhd);rm(wshdPolyOptions)
+rm(template);rm(nhd);rm(wshdPolyOptions); rm(landusewide)
 
 
 
@@ -302,7 +302,7 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
 Result <- left_join(Result,streams, by=c('StationID')) # only join on StationID bc stream data same for all years
 #write.csv(streams,paste(saveHere,'/streams.csv', sep=''))
 #write.csv(Result,paste(saveHere,'/Results4.csv', sep=''))
-rm(nhd); rm(streams); rm(streams1); rm(wshdPolyOptions)
+rm(nhd); rm(streams); rm(streams1); rm(wshdPolyOptions); rm(testnhd)
 
 
 
@@ -313,26 +313,45 @@ DEM <- raster(paste(wd,'/vaelevation.TIF',sep=''))
 # Set up dataframe to store elevation data
 elev <- data.frame(StationID=NA,ELEVMIN=NA,ELEVMAX=NA,ELEVMEAN=NA,ELEVSD=NA,ELEVRANGE=NA)
 
-elevationCalcs <- function(x){
-  print(paste(x,wshdPolys@data$StationID[x],sep=' '))
-  e <-  extract(DEM, wshdPolys[x,],small=T, na.rm=F) 
-  ELEVMIN <- as.numeric(sapply(e, FUN=min, na.rm=T))
-  ELEVMAX <- as.numeric(sapply(e, FUN=max, na.rm=T))
-  ELEVMEAN <- as.numeric(sapply(e, FUN=mean, na.rm=T))
-  ELEVSD <- as.numeric(sapply(e, FUN=sd, na.rm=T))
-  s <- data.frame(StationID=wshdPolys@data$StationID[x])%>%
-    mutate(ELEVMIN=ELEVMIN,ELEVMAX=ELEVMAX,ELEVMEAN=ELEVMEAN,ELEVSD=ELEVSD,ELEVRANGE=ELEVMAX-ELEVMIN)
-  return(s)
-}
 
-for(i in 1:length(wshdList)){ 
-  e <- elevationCalcs(i)
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  
+  e <- areaCalcs(DEM, wshdPolyOptions[1,], 'ELEV')
   elev <- rbind(elev,e)
   elev <- elev[complete.cases(elev$StationID),]
 }
 
 # Add to final results
-Result <- merge(Result,elev, by=c('StationID'))
-write.csv(elev,paste(saveHere,'/elev.csv', sep=''))
-write.csv(Result,paste(saveHere,'/Results6.csv', sep=''))
-rm(DEM)
+Result <- left_join(Result,elev, by=c('StationID')) # only join on StationID bc elevation data same for all years
+#write.csv(elev,paste(saveHere,'/elev.csv', sep=''))
+#write.csv(Result,paste(saveHere,'/Results6.csv', sep=''))
+rm(DEM); rm(wshdPolyOptions); rm(elev); rm(e)
+
+
+
+####### Slope Calculations 
+# Too large to bring in whole layer, clipped to bounding box in GIS first, exported as .TIFF from GIS
+slope <-  raster(paste(wd,'/slope2010.TIF',sep=''))
+
+# Set up dataframe to store slope data
+slp <- data.frame(StationID=NA,SLPMIN=NA,SLPMAX=NA,SLPMEAN=NA,SLPSD=NA,SLPRANGE=NA)
+
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  
+  e <- areaCalcs(slope, wshdPolyOptions[1,], 'SLP')
+  slp <- rbind(slp,e)
+  slp <- slp[complete.cases(slp$StationID),]
+}
+
+# Add to final results
+Result <- merge(Result,slp, by='StationID')  # only join on StationID bc elevation data same for all years
+#write.csv(slp,paste(saveHere,'/slp.csv', sep=''))
+#write.csv(Result,paste(saveHere,'/Results7.csv', sep=''))
+rm(slope); rm(wshdPolyOptions); rm(slp); rm(e)
+
