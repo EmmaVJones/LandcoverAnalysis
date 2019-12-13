@@ -24,13 +24,6 @@ saveHere <- 'Results'
 
 
 # Bring in watersheds
-#wshdPolys <- readOGR('GISdata/EmmaMessAround','TwinWatersheds')
-#wshdSites <- readOGR('GISdata/EmmaMessAround','TwinSites')
-#wshdPolys@data$StationID <- sub("\r\n" ,"",wshdPolys@data$StationID) # get rid of any stray spaces after StationID in attribute table
-#wshdSites@data$StationID <- sub("\r\n" ,"",wshdSites@data$StationID) # get rid of any stray spaces after StationID in attribute table
-#wshdList <- as.character(wshdPolys$StationID)
-#siteList <- as.character(wshdSites$StationID)
-
 wshdPolys <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
   filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94")) %>%
   dplyr::select(StationID)
@@ -41,23 +34,23 @@ wshdSites <- st_read('GISdata/AllStations_through2016.shp') %>%
 #siteList <- as.character(wshdSites$StationID)
 
 
-wshdPolys <- st_read('GISdata/EmmaMessAround/TwinWatersheds.shp')
-wshdSites <- st_read('GISdata/EmmaMessAround/TwinSites.shp')
-#wshdPolys@data$StationID <- sub("\r\n" ,"",wshdPolys@data$StationID) # get rid of any stray spaces after StationID in attribute table
-#wshdSites@data$StationID <- sub("\r\n" ,"",wshdSites@data$StationID) # get rid of any stray spaces after StationID in attribute table
-wshdList <- as.character(wshdPolys$StationID)
-siteList <- as.character(wshdSites$StationID)
+#wshdPolys <- st_read('GISdata/EmmaMessAround/TwinWatersheds.shp')
+#wshdSites <- st_read('GISdata/EmmaMessAround/TwinSites.shp')
+###wshdPolys@data$StationID <- sub("\r\n" ,"",wshdPolys@data$StationID) # get rid of any stray spaces after StationID in attribute table
+###wshdSites@data$StationID <- sub("\r\n" ,"",wshdSites@data$StationID) # get rid of any stray spaces after StationID in attribute table
+###wshdList <- as.character(wshdPolys$StationID)
+###siteList <- as.character(wshdSites$StationID)
 
 # Critical Link (file with StationID's linked to year sampled for correct NLCD)
 # This file must have fields: StationID and Year_ where StationID=DEQStationID that
 #   matches input watershed StationID's and Year_ is year sampled
 criticalLink <- read_csv('C:/HardDriveBackup/R/GitHub/ProbMon-Integrated-Reports/2018/processedData/Wadeable_ProbMon_2001-2016_EVJ.csv')%>%
   dplyr::select(StationID,Year,StationID_Trend,EcoRegion,BioRegion,Order,StreamSizeCat)%>%
-  dplyr::rename(Year_=Year)
+  dplyr::rename(YearSampled=Year)
 
 years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
-  mutate(year = ifelse(!is.na(Year_),Year_,2016), # get rid of NA's, replace with 2016 for now bc most recent NLCD release
-         NLCDyear = case_when( between(year, 2000, 2003) ~ 2001, 
+  mutate(year = ifelse(!is.na(YearSampled),YearSampled,2016), # get rid of NA's, replace with 2016 for now bc most recent NLCD release
+         NLCD = case_when( between(year, 2000, 2003) ~ 2001, 
                                between(year, 2004, 2008) ~ 2006,
                                between(year, 2009, 2013) ~ 2011,
                                between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
@@ -65,7 +58,27 @@ years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
 
 
 wshdPolys <- left_join(wshdPolys, years, by = 'StationID')
-wshdList <- as.character(wshdPolys$StationID)
+
+# use this variable for sifting through unique watersheds for things that don't vary by sample year, 
+# e.g. permit counts, dam counts, stream length, elevation, slope, rainfall
+uniqueWshdList <- unique(as.character(wshdPolys$StationID)) 
+
+# use this variable for sifting through, unique NLCD years to efficiently calculate landcover, riparian, and imperviousness metrics
+uniqueWshdListNLCD <- wshdPolys %>%
+  st_drop_geometry() %>%
+  group_by(StationID, NLCD) %>%
+  distinct(StationID) %>%ungroup()
+# use this variable when you need to calculate yearly data releases, e.g. roads
+uniqueWshdListYear <- wshdPolys %>%
+  st_drop_geometry() %>%
+  group_by(StationID, YearSampled) %>%
+  distinct(StationID) %>% ungroup()
+  
+# and this version has all the important data
+uniqueWshdListNLCDYear <- wshdPolys %>%
+  st_drop_geometry() %>%
+  group_by(StationID, YearSampled, NLCD) %>%
+  distinct(StationID) %>%ungroup()
 
 
 # Bring in appropriate landcover layer 
@@ -89,20 +102,37 @@ template <- tibble(StationID = 'template', VALUE_11=0,VALUE_21=0,VALUE_22=0, VAL
 
 
 # Run the functions
-df <- mutate(template,StationID=NA,YearSampled=NA,NLCD=NA, sqMi=NA)%>%
-  dplyr::select(StationID,YearSampled,NLCD,everything(), sqMi)
+df <- mutate(template,StationID=NA,NLCD=NA, sqMi=NA)%>%
+  dplyr::select(StationID,NLCD,everything(), sqMi)
 
-for(i in 1:length(wshdList)){
-  #l <- landuseCalc(i)
-  l <- landcoverCounts(template, get(paste0('landcover',wshdPolys$NLCDyear[i])), wshdPolys[i,])
+for( i in 1:nrow(uniqueWshdListNLCD)){
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdListNLCD$StationID[i] &
+                       NLCD %in% uniqueWshdListNLCD$NLCD[i])
+  
+  l <- landcoverCounts(template, get(paste0('landcover',unique(wshdPolyOptions$NLCD))),
+                       wshdPolyOptions[1,]) # only need to use one polygon to do analysis
   df <- rbind(df,l) # must use rbind() instead of df[i,] <- l because l could be multiple rows
   df <- df[complete.cases(df[,1]),]#remove any placeholder rows
 }
 
-landusewide <- landuseDataManagement(df)
+
+#for(i in 1:length(wshdList)){
+#  l <- landcoverCounts(template, get(paste0('landcover',wshdPolys$NLCDyear[i])), wshdPolys[i,])
+#  df <- rbind(df,l) # must use rbind() instead of df[i,] <- l because l could be multiple rows
+#  df <- df[complete.cases(df[,1]),]#remove any placeholder rows
+#}
+
+# now reorganize counts and join (potentially smaller dataframe) to full watershed list
+landusewide <- landuseDataManagement(df, uniqueWshdListNLCDYear)
 
 #write.csv(landusewide,paste(saveHere,'landusewide.csv',sep=''))
-rm(l); rm(df)
+rm(l); rm(df);rm(wshdPolyOptions)
+
+
+
+
+
 
 #### RIPARIAN CALCULATIONS 
 # Bring in NHD polyline file
@@ -117,29 +147,41 @@ finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=N
                             ,RNAT120=NA,RFOR120=NA,RWETL120=NA,RSHRB120=NA,RNG120=NA,RBAR120=NA
                             ,RTotBAR120=NA,RHUM120=NA,RURB120=NA,RMBAR120=NA,RAGT120=NA,RAGP120=NA,RAGC120=NA) 
 
-for(i in 1:length(wshdList)){
-  # Subset nhd streams by each polygon in wshdPolys
-  testnhd <- nhd[wshdPolys[i,],] %>%
-    mutate(StationID = wshdPolys[i,]$StationID, Year_ = wshdPolys[i,]$Year_, NLCDyear = wshdPolys[i,]$NLCDyear)
+for(i in 1:nrow(uniqueWshdListNLCD)){
+  # get watershed polygon based on StationID and NLCD year combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdListNLCD$StationID[i] &
+                              NLCD %in% uniqueWshdListNLCD$NLCD[i])
+  
+  # Subset nhd streams by each polygon
+  testnhd <- nhd[wshdPolyOptions[1,],] %>% # only need to use one polygon to do analysis
+    mutate(StationID = unique(wshdPolyOptions$StationID), NLCDyear = unique(wshdPolyOptions$NLCD))
   
   # Assign StationID to line segments pertaining to each polygon StationID
   if(nrow(testnhd)==0){
+    # do all the joining in case watershed sampled multiple years
     blank <- finalRiparian %>%
-      mutate(StationID=wshdList[i])
+      mutate(StationID = uniqueWshdListNLCDYear$StationID[i],
+             NLCD = uniqueWshdListNLCD$NLCD[i]) %>%
+      left_join(uniqueWshdListNLCDYear, by = c('StationID','NLCD')) %>%
+      dplyr::select(-c(YearSampled.x)) %>%
+      dplyr::select(StationID, YearSampled.y, NLCD, everything()) %>%
+      dplyr::rename('YearSampled' = 'YearSampled.y')
     finalRiparian <- rbind(finalRiparian, blank)
   }else{
-    finalRiparian <- rbind(finalRiparian, ripCalc(testnhd, get(paste0('landcover',wshdPolys$NLCDyear[i]))))
+    finalRiparian <- rbind(finalRiparian, ripCalc(testnhd, get(paste0('landcover',unique(wshdPolyOptions$NLCD))),
+                                                  uniqueWshdListNLCDYear))
   }
   finalRiparian <- finalRiparian[complete.cases(finalRiparian$StationID),]
 }
 
-Result <- merge(landusewide,finalRiparian, by=c('StationID','YearSampled','NLCD'))
+Result <- left_join(landusewide,finalRiparian, by=c('StationID','YearSampled','NLCD'))
 
 #write.csv(finalRiparian,paste(saveHere,'finalRiparian.csv',sep=''))
 #write.csv(Result,paste(saveHere,'Result1.csv',sep=''))
 rm(testnhd); rm(finalRiparian)
 rm(landcover2001);rm(landcover2006);rm(landcover2011); rm(landcover2016)#remove raster to increase memory availability
-rm(template);rm(nhd)
+rm(template);rm(nhd);rm(wshdPolyOptions)
+
 
 
 ############################### % Impervious Calculations ##############################################
@@ -151,24 +193,27 @@ imperv2016  <- raster(paste0(wd,"/NLCD2016imp.TIF"))
 
 
 # Set up dataframe to store impervious data
-dfi <- data.frame(matrix(NA, ncol = 105))
-names(dfi) <- c('StationID','YearSampled','NLCD',paste("PCT",c(0:100),sep=""), 'sqMi')
-templatei <- dfi[,4:104]
+dfi <- data.frame(matrix(NA, ncol = 104))
+names(dfi) <- c('StationID','NLCD',paste("PCT",c(0:100),sep=""), 'sqMi')
+templatei <- dfi[,3:104]
 
 # Run the impervious
-for(i in 1:length(wshdList)){
-  #l <- imperviousCalc(i)
-  impervious <- impervousCounts(templatei, get(paste0('imperv',wshdPolys$NLCDyear[i])), wshdPolys[i,])
+for(i in 1:nrow(uniqueWshdListNLCD)){
+  # get watershed polygon based on StationID and NLCD year combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdListNLCD$StationID[i] &
+                              NLCD %in% uniqueWshdListNLCD$NLCD[i])
+  
+  impervious <- impervousCounts(templatei, get(paste0('imperv',unique(wshdPolyOptions$NLCD))), wshdPolyOptions[1,])
   
   dfi <- rbind(dfi,impervious) # must use rbind() instead of df[i,] <- l because l could be multiple rows
   dfi <- dfi[complete.cases(dfi$StationID),] #remove any placeholder rows
 }
 
-imperviousresults <- imperviousDataManagement(dfi)  
+imperviousresults <- imperviousDataManagement(dfi, uniqueWshdListNLCDYear)  
 Result <- left_join(Result,imperviousresults, by=c('StationID','YearSampled','NLCD'))
 #write.csv(imperviousresults,paste(saveHere,'impervious.csv',sep=''))  
 #write.csv(Result,paste(saveHere,'Result5.csv',sep=''))  
-rm(imperv2001); rm(imperv2006); rm(imperv2011);rm(imperv2016); rm(dfi); rm(templatei); rm(impervious); rm(imperviousresults)
+rm(imperv2001); rm(imperv2006); rm(imperv2011);rm(imperv2016); rm(dfi); rm(templatei); rm(impervious); rm(imperviousresults);rm(wshdPolyOptions)
 
 
 
@@ -181,23 +226,26 @@ vaVPDES <- st_read(paste0(wd, '/vpdesalbers.shp'))
 vaVPDES1 <- vaVPDES[0,] %>%
   st_drop_geometry() %>%
   add_row() %>%
-  mutate(StationID=NA,YearSampled = NA, NLCD = NA)
+  mutate(StationID=NA)
 
 
-for(i in 1:length(wshdList)){
-  permitCount <- pointCount(vaVPDES, wshdPolys[i,])
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  
+  permitCount <- pointCount(vaVPDES, wshdPolyOptions[1,])
   vaVPDES1 <- rbind(vaVPDES1, permitCount) 
   vaVPDES1 <- vaVPDES1[complete.cases(vaVPDES1$StationID),] #remove any placeholder rows
 }
 
-permitResult <- VPDESdataManagement(vaVPDES1)
+permitResult <- VPDESdataManagement(vaVPDES1, uniqueWshdListNLCDYear)
 
 
 # Add to final results
-Result <- left_join(Result,vaVPDES1, by=c('StationID','YearSampled','NLCD'))
+Result <- left_join(Result,permitResult, by=c('StationID','YearSampled','NLCD'))
 #write.csv(Result,paste(saveHere,'/Result2.csv', sep=''))
 #write.csv(vaVPDES1,paste(saveHere,'/vaVPDES1.csv', sep=''))
-rm(vaVPDES); rm(permitResult); rm(permitCount); rm(vaVPDES1)#remove shapefile to increase memory availability
+rm(vaVPDES); rm(permitResult); rm(permitCount); rm(vaVPDES1);rm(wshdPolyOptions)#remove shapefile to increase memory availability
 
 
 #### Dam Calculations 
@@ -209,20 +257,23 @@ dams <- st_read(paste0(wd,'/dam_albers.shp')) %>%
 damResult <- dams[0,] %>%
   st_drop_geometry() %>%
   add_row() %>%
-  mutate(StationID=NA,YearSampled = NA, NLCD = NA)
+  mutate(StationID=NA)
 
-for(i in 1:length(wshdList)){
-  damCountresults <- pointCount(dams, wshdPolys[i,])
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  
+  damCountresults <- pointCount(dams, wshdPolyOptions[1,])
   damResult <- rbind(damResult,damCountresults)
   damResult <- damResult[complete.cases(damResult$StationID),]
 }
-damsummary <- damDataManagement(damResult)
+damsummary <- damDataManagement(damResult, uniqueWshdListNLCDYear)
 
 # Add to final results
-Result <- merge(Result,damsummary, by='StationID')
+Result <- merge(Result,damsummary, by=c('StationID','YearSampled','NLCD'))
 #write.csv(Result,paste(saveHere,'/Result3.csv', sep=''))
 #write.csv(damsummary,paste(saveHere,'/damsummary.csv', sep=''))
-rm(dams);rm(damsummary); rm(damCountresults); rm(damResult) #remove shapefile to increase memory availability
+rm(dams);rm(damsummary); rm(damCountresults); rm(damResult);rm(wshdPolyOptions) #remove shapefile to increase memory availability
 
 
 
@@ -231,20 +282,27 @@ rm(dams);rm(damsummary); rm(damCountresults); rm(damResult) #remove shapefile to
 # Bring in NHD polyline file
 nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
 
-streams <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,STRMLEN=NA,STRMDENS=NA)
+streams <- data.frame(StationID=NA,STRMLEN=NA,STRMDENS=NA)
 
-for(i in 1:length(wshdList)){
-  testnhd <- nhd[wshdPolys[i,],] 
-  streams1 <- streamCalcs(testnhd, wshdPolys[i,])
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  
+  # Subset nhd streams by each polygon
+  testnhd <- nhd[wshdPolyOptions[1,],] %>% # only need to use one polygon to do analysis
+    mutate(StationID = unique(wshdPolyOptions$StationID))
+  
+  #testnhd <- nhd[wshdPolys[i,],] 
+  streams1 <- streamCalcs(testnhd, wshdPolyOptions[1,])
   streams <- rbind(streams,streams1)
   streams <- streams[complete.cases(streams$StationID),]
 }
 
 # Add to final results
-Result <- left_join(Result,streams, by=c('StationID','YearSampled','NLCD'))
+Result <- left_join(Result,streams, by=c('StationID')) # only join on StationID bc stream data same for all years
 #write.csv(streams,paste(saveHere,'/streams.csv', sep=''))
 #write.csv(Result,paste(saveHere,'/Results4.csv', sep=''))
-rm(nhd); rm(streams); rm(streams1)
+rm(nhd); rm(streams); rm(streams1); rm(wshdPolyOptions)
 
 
 
