@@ -1,17 +1,21 @@
 
-
 landcoverCounts <- function(template, landcover, wshdPoly){
   e <- extract(landcover, wshdPoly, small=T, na.rm=F)
+  # if length of e > 1 (likely for riparian use) then combine to a single list
+  if(length(e) > 1){
+    e1 <- unlist(e, recursive = FALSE)
+    e <- list(e1)  } # have to unlist multiple lists but then still put back into single list to lapply table function
+  
   et <- lapply(e,table) %>%
     as.data.frame() %>%
-    mutate(StationID = wshdPoly$StationID,
+    mutate(StationID = unique(wshdPoly$StationID),
            colNames = paste0('VALUE_',Var1)) %>% # rename so dont start column name with a number
     dplyr::select(-Var1) %>% # drop column so it won't mess things up going wide
     pivot_wider(names_from = colNames, values_from = Freq) 
   results <- suppressWarnings(bind_rows(template,et) %>%
                                 mutate_if(is.numeric, ~replace_na(., 0)) %>%
-                                mutate(NLCD = wshdPoly$NLCD,
-                                       sqMi = as.numeric(st_area(wshdPoly)) * 0.00000038610) %>% # area comes out in m^2 so convert to sq miles
+                                mutate(NLCD = unique(wshdPoly$NLCD),
+                                       sqMi = sum(as.numeric(st_area(wshdPoly))) * 0.00000038610) %>% # area comes out in m^2 so convert to sq miles
                                 dplyr::select(StationID, NLCD, everything(),sqMi) %>%
                                 filter(!(StationID == 'template'))) # drop dummy row
   return(results)
@@ -94,16 +98,16 @@ landuseDataManagement <- function(x, uniqueWshdListNLCDYear){ #x is dataframe
   Result <- left_join(landusewide, diversity, by = c('StationID', 'NLCD')) %>%
     left_join(uniqueWshdListNLCDYear, by = c('StationID','NLCD')) %>%
     dplyr::select(StationID, YearSampled, NLCD, everything())
-    
+  
   
   return(Result)}
-  
 
 
 
 
-  
-  
+
+
+
 riparianDataManagement <- function(x){ #x is dataframe 
   z <- x %>%
     group_by(StationID, NLCD, bufferWidth) %>%
@@ -161,8 +165,8 @@ riparianDataManagement <- function(x){ #x is dataframe
     ungroup() 
   
   return(landusewide)}
-  
-  
+
+
 
 ripCalc <- function(testnhd, landcover, uniqueWshdListNLCDYear){
   # Buffer just the stream segments in selected watershed
@@ -176,7 +180,7 @@ ripCalc <- function(testnhd, landcover, uniqueWshdListNLCDYear){
     left_join(uniqueWshdListNLCDYear, by = c('StationID', 'NLCD')) %>%
     dplyr::select(StationID, YearSampled, NLCD, everything())
 }  
-  
+
 
 
 impervousCounts <- function(template, landcover, wshdPoly){
@@ -203,9 +207,9 @@ imperviousDataManagement <- function(x, uniqueWshdListNLCDYear){# x is a df
     pivot_longer(cols = starts_with("PCT"),names_to = "variable", 
                  values_to = 'value') %>%
     mutate(#sqMile = 900*value*0.0002471053814672*0.0015625, 
-           sqMile = value * 0.000347492,
-           PCT = as.numeric(substr(variable, 4,length(variable))), 
-           sqMileImp=sqMile*(PCT/100)) %>%
+      sqMile = value * 0.000347492,
+      PCT = as.numeric(substr(variable, 4,length(variable))), 
+      sqMileImp=sqMile*(PCT/100)) %>%
     summarize(totalArea_sqMile=sum(sqMile, na.rm = T),
               sqMileImp=sum(sqMileImp, na.rm = T)) %>%
     mutate(wshdImpPCT = (sqMileImp / totalArea_sqMile) * 100) %>%
@@ -214,7 +218,7 @@ imperviousDataManagement <- function(x, uniqueWshdListNLCDYear){# x is a df
     left_join(uniqueWshdListNLCDYear, by =  c('StationID','NLCD')) %>%
     dplyr::select(StationID, YearSampled, NLCD, everything())
 }
-  
+
 
 pointCount <- function(pointFile, polygonFile){
   s <- pointFile[polygonFile,] %>%
@@ -244,8 +248,8 @@ VPDESdataManagement <- function(x, uniqueWshdListNLCDYear){# x is a dataframe
     ungroup() %>%
     left_join(uniqueWshdListNLCDYear, by = 'StationID') %>%
     dplyr::select(StationID, YearSampled, NLCD, everything())
-  }
-            
+}
+
 
 damDataManagement <- function(x, uniqueWshdListNLCDYear){#x is a dataframe
   x %>%
@@ -256,7 +260,7 @@ damDataManagement <- function(x, uniqueWshdListNLCDYear){#x is a dataframe
     left_join(uniqueWshdListNLCDYear, by = 'StationID') %>%
     dplyr::select(StationID, YearSampled, NLCD, everything())
   
-  }
+}
 
 
 
@@ -290,7 +294,7 @@ areaCalcs <- function(rasterLayer, wshdPoly, varName){
   
   return(df)
 }
-    
+
 
 rainfallCalc <- function(rasterLayer, wshdPoly, wshdPoint){
   e_poly <- extract(rasterLayer, wshdPoly, small=T, na.rm=F)
@@ -328,10 +332,10 @@ popCalculation <- function(popYearLayer, wshdPoly, populationField, censusYear){
   return(popSummary)
 }
 
-  
-  
-  
-                 
+
+
+
+
 
 roadCalculation <- function(x){
   testroads <- suppressWarnings(raster::intersect(roads,wshdPolys[x,])) # cut roads to watershed of interest
@@ -352,7 +356,7 @@ roadCalculation <- function(x){
       STXRD_CNT <- nrow(as.matrix(streamXroad@coords))  # calculate number of stream/road crossings
     }else{
       STXRD_CNT <- 0 # set stream/road crossings to 0 if needed
-      }
+    }
   }else{
     RDLEN <- 0
     RDLEN120 <- 0

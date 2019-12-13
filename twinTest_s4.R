@@ -165,3 +165,36 @@ imperviousresults <- imperviousDataManagement(dfi)
 Result <- merge(Result,imperviousresults, by=c('StationID','YearSampled','NLCD'))
 write.csv(imperviousresults,paste(saveHere,'impervious.csv',sep=''))  
 write.csv(Result,paste(saveHere,'Result5.csv',sep=''))  
+
+
+
+
+########### Population Density Calculations 
+# Bring in clipped block census data
+pop2000 <- readOGR(wd, layer='pop2000final')
+pop2010 <- readOGR(wd, layer='pop2010final')
+
+pop <- data.frame(StationID=NA,wshdPOP2000=NA,wshdPOP2010=NA)
+
+for(i in 1:length(wshdPolys)){
+  pop_ <- popCalculation(i)
+  pop <- rbind(pop,pop_)
+  pop <- pop[complete.cases(pop$StationID),]
+}
+
+
+pop <- merge(pop,landusewide[,1:4],by='StationID')%>%
+  mutate(POPDENS2000=wshdPOP2000/(totalArea_sqMile*2.58999)
+         ,POPDENS2010=wshdPOP2010/(totalArea_sqMile*2.58999)
+         ,POPCHG2000_2010=((POPDENS2010-POPDENS2000)/POPDENS2000)*100)%>%
+  select(-c(YearSampled,NLCD,totalArea_sqMile))
+
+
+# Add to final results
+Result <- merge(Result,pop,by='StationID')
+write.csv(Result,paste(saveHere,'Result9.csv'))
+write.csv(pop,paste(saveHere,'/pop.csv', sep=''))
+rm(pop2000)#remove shapefile to increase memory availability
+rm(pop2010)#remove shapefile to increase memory availability
+
+

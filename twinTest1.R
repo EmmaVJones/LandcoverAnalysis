@@ -49,9 +49,9 @@ criticalLink <- read_csv('C:/HardDriveBackup/R/GitHub/ProbMon-Integrated-Reports
 years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
   mutate(year = ifelse(!is.na(YearSampled),YearSampled,2016), # get rid of NA's, replace with 2016 for now bc most recent NLCD release
          NLCD = case_when( between(year, 2000, 2003) ~ 2001, 
-                               between(year, 2004, 2008) ~ 2006,
-                               between(year, 2009, 2013) ~ 2011,
-                               between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
+                           between(year, 2004, 2008) ~ 2006,
+                           between(year, 2009, 2013) ~ 2011,
+                           between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
 
 
 
@@ -71,7 +71,7 @@ uniqueWshdListYear <- wshdPolys %>%
   st_drop_geometry() %>%
   group_by(StationID, YearSampled) %>%
   distinct(StationID) %>% ungroup()
-  
+
 # and this version has all the important data
 uniqueWshdListNLCDYear <- wshdPolys %>%
   st_drop_geometry() %>%
@@ -95,8 +95,8 @@ source('landcoverFunctions_rebuild.R')
 #### LANDUSE CALCULATIONS
 # Set up dataframe to store landcover data
 template <- tibble(StationID = 'template', VALUE_11=0,VALUE_21=0,VALUE_22=0, VALUE_23=0,VALUE_24=0
-                       ,VALUE_31=0,VALUE_41=0,VALUE_42=0,VALUE_43=0,VALUE_52=0,VALUE_71=0
-                       ,VALUE_81=0,VALUE_82=0,VALUE_90=0,VALUE_95=0)
+                   ,VALUE_31=0,VALUE_41=0,VALUE_42=0,VALUE_43=0,VALUE_52=0,VALUE_71=0
+                   ,VALUE_81=0,VALUE_82=0,VALUE_90=0,VALUE_95=0)
 
 
 # Run the functions
@@ -106,7 +106,7 @@ df <- mutate(template,StationID=NA,NLCD=NA, sqMi=NA)%>%
 for( i in 1:nrow(uniqueWshdListNLCD)){
   # get watershed polygon based on StationID and NLCDyear combination
   wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdListNLCD$StationID[i] &
-                       NLCD %in% uniqueWshdListNLCD$NLCD[i])
+                              NLCD %in% uniqueWshdListNLCD$NLCD[i])
   
   l <- landcoverCounts(template, get(paste0('landcover',unique(wshdPolyOptions$NLCD))),
                        wshdPolyOptions[1,]) # only need to use one polygon to do analysis
@@ -424,4 +424,4 @@ population <- left_join(pop2000results, pop2010results, by = 'StationID') %>%
 Result <- left_join(Result,pop,by='StationID') # only join on StationID bc elevation data same for all years
 #write.csv(Result,paste(saveHere,'Result9.csv'))
 #write.csv(pop,paste(saveHere,'/pop.csv', sep=''))
-
+rm(population); rm(pop2010results); rm(pop2000results)
