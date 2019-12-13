@@ -421,7 +421,77 @@ population <- left_join(pop2000results, pop2010results, by = 'StationID') %>%
 
 
 # Add to final results
-Result <- left_join(Result,pop,by='StationID') # only join on StationID bc elevation data same for all years
+Result <- left_join(Result,population,by='StationID') # only join on StationID bc elevation data same for all years
 #write.csv(Result,paste(saveHere,'Result9.csv'))
 #write.csv(pop,paste(saveHere,'/pop.csv', sep=''))
 rm(population); rm(pop2010results); rm(pop2000results)
+
+
+
+
+
+
+############################## Road Density Calculations ###################################################
+# TigerRoad file, HUGE! can preclip in GIS to speed this up, only for more advanced R users
+#roads <- st_read(paste0(wd, '/2010superroads.shp'))
+# Bring in NHD polyline file
+nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
+
+roaddf <- data.frame(StationID=NA, RDLEN=NA,RDLEN120=NA, wshd_sqkm=NA, area120_sqkm=NA, STXRD_CNT=NA)
+
+
+# First need to build function (loop) that runs each watershed in a given year
+for(i in 1:length(unique(uniqueWshdListYear$YearSampled))){ # only need to do this calculation once per polygon
+  
+  stationsToProcess <- filter(uniqueWshdListYear, YearSampled %in% uniqueWshdListYear$YearSampled[i])
+  
+  # replace this with unique years once that is organize correctly
+  roadFile <- st_read(paste0(wd, '/2010superroads.shp'))
+  
+  for(k in 1:nrow(stationsToProcess)){
+    # get watershed polygon based on StationID and NLCDyear combination
+    wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[k])
+    
+    # Subset nhd streams by each polygon
+    testnhd <- nhd[wshdPolyOptions[1,],] %>% # only need to use one polygon to do analysis
+      mutate(StationID = unique(wshdPolyOptions$StationID))
+    
+    testroads <- roadFile[wshdPolyOptions[1,],]  # cut roads to watershed of interest
+    # start at i = 1 (fake bc just using 2010 roads to test) and k = 4 to get roads in watershed. k 1:3 didnt have any roads so good to test for no intersection situation
+    
+    roadCalculation(testroads, testnhd, wshdPolyOptions[1,])
+    
+    streams1 <- streamCalcs(testnhd, wshdPolyOptions[1,])
+    streams <- rbind(streams,streams1)
+    streams <- streams[complete.cases(streams$StationID),]
+    
+  }
+  
+}
+  
+# then build it that the loop organizes which road files need to be run for which years as to only bring in one road file at a time
+
+
+
+for(i in 1:length(wshdPolys)){ 
+  print(i)
+  roaddf[i,] <- roadCalculation(i)
+}
+
+roaddf[,2:6] <- apply(roaddf[,2:6],2,function(x) as.numeric(x))
+roaddf <- join_all(list(roaddf,streams[,c(1,4)]), by='StationID') %>%
+  mutate(roadlength_km=RDLEN/1000,RDDENS=roadlength_km/(wshd_sqkm),
+         roadlength120_km=RDLEN120/1000,RDDENS=roadlength120_km/(area120_sqkm),
+         pctRoadLengthInRiparian=(roadlength120_km/roadlength_km)*100,
+         streamlength_km=STRMLEN/1000, STXRD=STXRD_CNT/streamlength_km)%>%
+  select(-c(wshd_sqkm,area120_sqkm,streamlength_km,roadlength_km,roadlength120_km,STRMLEN))
+
+# Add to final results
+Result <- merge(Result,roaddf, by='StationID')
+write.csv(Result,paste(saveHere,'Result10.csv'))
+write.csv(roaddf,paste(saveHere,'roaddf.csv', sep=''))
+rm(roads)#remove shapefile to increase memory availability
+
+
+
+
