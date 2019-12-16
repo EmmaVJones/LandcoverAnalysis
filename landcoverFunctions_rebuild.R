@@ -334,66 +334,38 @@ popCalculation <- function(popYearLayer, wshdPoly, populationField, censusYear){
 
 
 
-wshdPoly <- wshdPolyOptions[1,]
+
+
+
+
 
 roadCalculation <- function(testroads, testnhd, wshdPoly){
-  wshd_sqkm <- as.numeric(st_area(wshdPoly))*1e-6 # save area of watershed
+  bufferNHD <- st_buffer(testnhd, dist = 120) # buffer all streams in watershed to riparian buffer distance
+  roadInRiparianBuffer <- suppressWarnings(st_intersection(testroads, bufferNHD)) # cut roads to riparian buffer
+  streamXroad <- suppressWarnings(st_intersection(testroads,testnhd)) # find all stream/road crossings
   
-  if(nrow(testroads)>0){
-    RDLEN <- sum(as.numeric(st_length(testroads))) # calculate road length throughout watershed (in meters)
-    
-    
-    bufferNHD <- st_buffer(testnhd, dist = 120) # buffer all streams in watershed to riparian buffer distance
-    
-    area120_sqkm <- sum(as.numeric(st_area(bufferNHD)))*1e-6 # save area of 120m buffer
-    
-    roadInRiparianBuffer <- suppressWarnings(raster::intersect(roads,bufferNHD)) # cut roads to riparian buffer
-    
-    if(length(roadInRiparianBuffer)==0){
-      RDLEN120 <- 0 # calculate road length in riparian buffer (in meters)
-    }else{
-      RDLEN120 <- gLength(roadInRiparianBuffer) # calculate road length in riparian buffer (in meters)
-    }
-    streamXroad <- gIntersection(testroads,testnhd) # find all stream/road crossings
-    if(length(streamXroad)>0){
-      STXRD_CNT <- nrow(as.matrix(streamXroad@coords))  # calculate number of stream/road crossings
-    }else{
-      STXRD_CNT <- 0 # set stream/road crossings to 0 if needed
-    }
-  }else{
-    RDLEN <- 0
-    RDLEN120 <- 0
-    area120_sqkm <- 0
-    STXRD_CNT <- 0}
-  return(cbind(StationID=wshdList[x],RDLEN,RDLEN120, wshd_sqkm, area120_sqkm,STXRD_CNT))
+  return(data.frame(StationID = unique(wshdPoly$StationID),
+                    roadYear = unique(testroads$roadYear),
+                    wshd_sqkm = sum(as.numeric(st_area(wshdPoly)))*1e-6, # save area of watershed
+                    area120_sqkm = sum(as.numeric(st_area(bufferNHD)))*1e-6, # save area of 120m buffer
+                    RDLEN = sum(as.numeric(st_length(testroads))), # calculate road length throughout watershed (in meters)
+                    STRMLEN = sum(as.numeric(st_length(testnhd))), # calculate stream length throughout watershed (in meters)
+                    RDLEN120 = sum(as.numeric(st_length(roadInRiparianBuffer))), # calculate road length in riparian buffer (in meters)
+                    STXRD_CNT = nrow(streamXroad) ) )# calculate number of stream/road 
 }
 
 
 
-roadCalculation <- function(x){
-  testroads <- suppressWarnings(raster::intersect(roads,wshdPolys[x,])) # cut roads to watershed of interest
-  wshd_sqkm <- gArea(wshdPolys[x,])*1e-6 # save area of watershed
-  if(length(testroads)>0){
-    RDLEN <- gLength(testroads) # calculate road length throughout watershed (in meters)
-    testnhd <- suppressWarnings(raster::intersect(nhd,wshdPolys[x,])) # cut NHD to watershed of interest
-    bufferNHD <- gBuffer(testnhd,width=120) # buffer all streams in watershed to riparian buffer distance
-    area120_sqkm <- gArea(bufferNHD)*1e-6 # save area of 120m buffer
-    roadInRiparianBuffer <- suppressWarnings(raster::intersect(roads,bufferNHD)) # cut roads to riparian buffer
-    if(length(roadInRiparianBuffer)==0){
-      RDLEN120 <- 0 # calculate road length in riparian buffer (in meters)
-    }else{
-      RDLEN120 <- gLength(roadInRiparianBuffer) # calculate road length in riparian buffer (in meters)
-    }
-    streamXroad <- gIntersection(testroads,testnhd) # find all stream/road crossings
-    if(length(streamXroad)>0){
-      STXRD_CNT <- nrow(as.matrix(streamXroad@coords))  # calculate number of stream/road crossings
-    }else{
-      STXRD_CNT <- 0 # set stream/road crossings to 0 if needed
-    }
-  }else{
-    RDLEN <- 0
-    RDLEN120 <- 0
-    area120_sqkm <- 0
-    STXRD_CNT <- 0}
-  return(cbind(StationID=wshdList[x],RDLEN,RDLEN120, wshd_sqkm, area120_sqkm,STXRD_CNT))
+roadSummary <- function(roaddf, uniqueWshdListYear){
+  mutate(roaddf, 
+         roadlength_km = RDLEN / 1000,
+         RDDENS = roadlength_km / wshd_sqkm,
+         roadlength120_km = RDLEN120 / 1000,
+         RDDENS = roadlength120_km / area120_sqkm,
+         pctRoadLengthInRiparian = (roadlength120_km / roadlength_km) * 100,
+         streamlength_km = STRMLEN / 1000,
+         STXRD = STXRD_CNT / streamlength_km) %>%
+    # fix YearSampled to match actual year sampled for joining
+    left_join(uniqueWshdListYear, by= c('StationID','roadYear'))  %>%
+  dplyr::select(StationID, YearSampled, RDLEN, RDLEN120, STXRD_CNT, RDDENS, pctRoadLengthInRiparian, STXRD)
 }
