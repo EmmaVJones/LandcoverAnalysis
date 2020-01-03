@@ -5,8 +5,8 @@
 
 
 
-library(tidyverse)
-library(sf)
+#library(tidyverse)
+#library(sf)
 
 
 
@@ -28,10 +28,16 @@ combineSpatialData <- function(inDirectoryName, outDirectoryName, outShapefileNa
   # Read in shapefiles and add field that appropriately links StationID name
   shapefiles <- filenames %>%
     map(st_read) %>%
-    reduce(rbind) %>%
-    transmute(StationID = stationIDs) %>%
-    st_transform(crs = '+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs +ellps=GRS80 +towgs84=0,0,0 ')
+    map2(stationIDs,~mutate(.x,StationID=.y)) %>% # make a StationID column
+    map(~dplyr::select(.,StationID)) %>%
+    reduce(rbind) 
   
+  # reproject if needed
+  if(st_crs(shapefiles)$proj4string != "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"){
+    shapefiles <- st_transform(shapefiles, crs = "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
+  }
+  
+
   #Save out shapefile
   st_write(shapefiles, paste0(outDirectoryName, '/', outShapefileName, '.shp'))
   
@@ -39,15 +45,15 @@ combineSpatialData <- function(inDirectoryName, outDirectoryName, outShapefileNa
 
 
 # Run function
-combineSpatialData(inDirectoryName = 'GISdata/EmmaMessAround/Watersheds', # Where are the files in question stored? (Relative or absolute path name)
-                   outDirectoryName = 'GISdata/EmmaMessAround', # Where should the combined file be saved? (Relative or absolute path name)
-                   outShapefileName = 'TwinWatersheds', # What do you want to call the shapefile?
-                   shapefileType = 'watershed' # Are we dealing with watershed or site data? 
-                   )
+#combineSpatialData(inDirectoryName = 'GISdata/EmmaMessAround/Watersheds', # Where are the files in question stored? (Relative or absolute path name)
+#                   outDirectoryName = 'GISdata/EmmaMessAround', # Where should the combined file be saved? (Relative or absolute path name)
+#                   outShapefileName = 'TwinWatersheds', # What do you want to call the shapefile?
+#                   shapefileType = 'watershed' # Are we dealing with watershed or site data? 
+#                   )
 
 
-combineSpatialData(inDirectoryName = 'GISdata/EmmaMessAround/Sites', # Where are the files in question stored? (Relative or absolute path name)
-                   outDirectoryName = 'GISdata/EmmaMessAround', # Where should the combined file be saved? (Relative or absolute path name)
-                   outShapefileName = 'TwinSites', # What do you want to call the shapefile?
-                   shapefileType = 'site' # Are we dealing with watershed or site data? 
-)
+#combineSpatialData(inDirectoryName = 'GISdata/EmmaMessAround/Sites', # Where are the files in question stored? (Relative or absolute path name)
+#                   outDirectoryName = 'GISdata/EmmaMessAround', # Where should the combined file be saved? (Relative or absolute path name)
+#                   outShapefileName = 'TwinSites', # What do you want to call the shapefile?
+#                   shapefileType = 'site' # Are we dealing with watershed or site data? 
+#)

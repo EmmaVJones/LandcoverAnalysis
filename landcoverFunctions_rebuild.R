@@ -339,13 +339,13 @@ popCalculation <- function(popYearLayer, wshdPoly, populationField, censusYear){
 
 
 
-roadCalculation <- function(testroads, testnhd, wshdPoly){
+roadCalculation <- function(testroads, testnhd, wshdPoly, yr){
   bufferNHD <- st_buffer(testnhd, dist = 120) # buffer all streams in watershed to riparian buffer distance
   roadInRiparianBuffer <- suppressWarnings(st_intersection(testroads, bufferNHD)) # cut roads to riparian buffer
   streamXroad <- suppressWarnings(st_intersection(testroads,testnhd)) # find all stream/road crossings
   
   return(data.frame(StationID = unique(wshdPoly$StationID),
-                    roadYear = unique(testroads$roadYear),
+                    roadYear = yr,
                     wshd_sqkm = sum(as.numeric(st_area(wshdPoly)))*1e-6, # save area of watershed
                     area120_sqkm = sum(as.numeric(st_area(bufferNHD)))*1e-6, # save area of 120m buffer
                     RDLEN = sum(as.numeric(st_length(testroads))), # calculate road length throughout watershed (in meters)

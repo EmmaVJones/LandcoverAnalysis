@@ -15,19 +15,27 @@ library(sf)
 
 # Establish a GIS working directory
 # This is where you will source all static GIS data for the project (not your input watersheds)
-wd <- "G:/evjones/GIS/ProbMonGIS/GISdata"
+wd <- "F:/evjones/GIS/ProbMonGIS/GISdata"
 
 # Where do you want to save the outputs? 
-saveHere <- 'Results/Interns2019/'
+saveHere <- 'Results/ProbRedo2001_2016/missing/'
 
 
 # Bring in watersheds
-wshdPolys <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
+wshdPolys <- st_read('GISdata/EmmaMessAround/missing2001-2016watersheds.shp') %>%
   #filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94",'1ACAH001.82')) %>%
-  dplyr::select(StationID)
+  dplyr::select(StationID) %>%
+  mutate(StationID = sub("\r\n" ,"",StationID)) # get rid of any stray spaces after StationID in attribute table
+#wshdPolys <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
+#  #filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94",'1ACAH001.82')) %>%
+#  dplyr::select(StationID) %>%
+#mutate(StationID = sub("\r\n" ,"",StationID)) # get rid of any stray spaces after StationID in attribute table
+
 wshdSites <- st_read('GISdata/AllStations_through2016.shp') %>%
   #filter(StationID %in% c("4AXOD000.38", "4AXOE001.26", "4AXOK000.29", "4AXOL000.94",'1ACAH001.82')) %>%
-  dplyr::select(StationID)
+  dplyr::select(StationID)%>%
+  mutate(StationID = sub("\r\n" ,"",StationID)) # get rid of any stray spaces after StationID in attribute table
+
 
 #wshdPolys <- st_read('GISdata/EmmaMessAround/TwinWatersheds.shp')
 #wshdSites <- st_read('GISdata/EmmaMessAround/TwinSites.shp')
@@ -51,15 +59,8 @@ years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
 
 
 wshdPolys <- left_join(wshdPolys, years, by = 'StationID') %>%
-  # Just get twin sites
-  filter(StationID %in% c(list.files(path ='C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/GISdata/InternSpatialData/Elisabeth', full.names = F),
-                          gsub('.prj','',list.files(path ='C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/GISdata/InternSpatialData/Elisabeth/Watersheds/',  
-                                                    pattern="*.prj", full.names=F)),
-                          list.files(path ='C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/GISdata/InternSpatialData/Maddy', full.names = F))) %>%
-  
-  
   # make sure there is a point for each watershed or rainfall will bomb out
-  #filter(StationID %in% unique(wshdSites$StationID)) %>%
+  filter(StationID %in% unique(wshdSites$StationID)) %>%
   # make sure every watershed has a NLCD year
   filter(!is.na(NLCD))
 
@@ -127,7 +128,7 @@ for( i in 1:nrow(uniqueWshdListNLCD)){
 # now reorganize counts and join (potentially smaller dataframe) to full watershed list
 landusewide <- landuseDataManagement(df, uniqueWshdListNLCDYear)
 
-#write.csv(landusewide,paste(saveHere,'landusewide.csv',sep=''), row.names= F)
+write.csv(landusewide,paste(saveHere,'landusewide.csv',sep=''), row.names= F)
 rm(l); rm(df);rm(wshdPolyOptions)
 
 
@@ -147,6 +148,9 @@ finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=N
                             ,RTotBAR30=NA,RHUM30=NA,RURB30=NA,RMBAR30=NA,RAGT30=NA,RAGP30=NA,RAGC30=NA
                             ,RNAT120=NA,RFOR120=NA,RWETL120=NA,RSHRB120=NA,RNG120=NA,RBAR120=NA
                             ,RTotBAR120=NA,RHUM120=NA,RURB120=NA,RMBAR120=NA,RAGT120=NA,RAGP120=NA,RAGC120=NA) 
+
+
+uniqueWshdListNLCD1 <- filter(uniqueWshdListNLCD, !(StationID %in% finalRiparian$StationID & YearSampled %in% finalRiparian$YearSampled))
 
 for(i in 1:nrow(uniqueWshdListNLCD)){
   # Status update
@@ -181,8 +185,8 @@ for(i in 1:nrow(uniqueWshdListNLCD)){
 
 Result <- left_join(landusewide,finalRiparian, by=c('StationID','YearSampled','NLCD'))
 
-#write.csv(finalRiparian,paste(saveHere,'finalRiparian.csv',sep=''), row.names= F)
-#write.csv(Result,paste(saveHere,'Result1.csv',sep=''), row.names= F)
+write.csv(finalRiparian,paste(saveHere,'finalRiparian3.csv',sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'Result1.csv',sep=''), row.names= F)
 rm(testnhd); rm(finalRiparian)
 rm(landcover2001);rm(landcover2006);rm(landcover2011); rm(landcover2016)#remove raster to increase memory availability
 rm(template);rm(nhd);rm(wshdPolyOptions); rm(landusewide)
@@ -219,8 +223,8 @@ for(i in 1:nrow(uniqueWshdListNLCD)){
 
 imperviousresults <- imperviousDataManagement(dfi, uniqueWshdListNLCDYear)  
 Result <- left_join(Result,imperviousresults, by=c('StationID','YearSampled','NLCD'))
-#write.csv(imperviousresults,paste(saveHere,'impervious.csv',sep=''), row.names= F)  
-#write.csv(Result,paste(saveHere,'Result2.csv',sep=''), row.names= F)  
+write.csv(imperviousresults,paste(saveHere,'impervious.csv',sep=''), row.names= F)  
+write.csv(Result,paste(saveHere,'Result2.csv',sep=''), row.names= F)  
 rm(imperv2001); rm(imperv2006); rm(imperv2011);rm(imperv2016); rm(dfi); rm(templatei); rm(impervious); rm(imperviousresults);rm(wshdPolyOptions)
 
 
@@ -238,6 +242,9 @@ vaVPDES1 <- vaVPDES[0,] %>%
 
 
 for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # Status update
+  print(paste0('Processing site ',i, ' of ', length(uniqueWshdList)))
+  
   # get watershed polygon based on StationID and NLCDyear combination
   wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
   
@@ -251,8 +258,8 @@ permitResult <- VPDESdataManagement(vaVPDES1, uniqueWshdListNLCDYear)
 
 # Add to final results
 Result <- left_join(Result,permitResult, by=c('StationID','YearSampled','NLCD'))
-#write.csv(Result,paste(saveHere,'/Result3.csv', sep=''), row.names= F)
-#write.csv(vaVPDES1,paste(saveHere,'/vaVPDES1.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'/Result3.csv', sep=''), row.names= F)
+write.csv(vaVPDES1,paste(saveHere,'/vaVPDES1.csv', sep=''), row.names= F)
 rm(vaVPDES); rm(permitResult); rm(permitCount); rm(vaVPDES1);rm(wshdPolyOptions)#remove shapefile to increase memory availability
 
 
@@ -268,6 +275,9 @@ damResult <- dams[0,] %>%
   mutate(StationID=NA)
 
 for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # Status update
+  print(paste0('Processing site ',i, ' of ', length(uniqueWshdList)))
+  
   # get watershed polygon based on StationID and NLCDyear combination
   wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
   
@@ -279,8 +289,8 @@ damsummary <- damDataManagement(damResult, uniqueWshdListNLCDYear)
 
 # Add to final results
 Result <- merge(Result,damsummary, by=c('StationID','YearSampled','NLCD'))
-#write.csv(Result,paste(saveHere,'/Result4.csv', sep=''), row.names= F)
-#write.csv(damsummary,paste(saveHere,'/damsummary.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'/Result4.csv', sep=''), row.names= F)
+write.csv(damsummary,paste(saveHere,'/damsummary.csv', sep=''), row.names= F)
 rm(dams);rm(damsummary); rm(damCountresults); rm(damResult);rm(wshdPolyOptions) #remove shapefile to increase memory availability
 
 
@@ -293,6 +303,9 @@ nhd <- st_read(paste0(wd,'/nhd_83albers.shp'))
 streams <- data.frame(StationID=NA,STRMLEN=NA,STRMDENS=NA)
 
 for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # Status update
+  print(paste0('Processing site ',i, ' of ', length(uniqueWshdList)))
+  
   # Status update
   print(paste0('Processing site ',i, ' of ', length(uniqueWshdList)))
   
@@ -310,8 +323,8 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
 
 # Add to final results
 Result <- left_join(Result,streams, by=c('StationID')) # only join on StationID bc stream data same for all years
-#write.csv(streams,paste(saveHere,'/streams.csv', sep=''), row.names= F)
-#write.csv(Result,paste(saveHere,'/Results5.csv', sep=''), row.names= F)
+write.csv(streams,paste(saveHere,'/streams.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'/Results5.csv', sep=''), row.names= F)
 rm(nhd); rm(streams); rm(streams1); rm(wshdPolyOptions); rm(testnhd)
 
 
@@ -338,8 +351,8 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
 
 # Add to final results
 Result <- left_join(Result,elev, by=c('StationID')) # only join on StationID bc elevation data same for all years
-#write.csv(elev,paste(saveHere,'/elev.csv', sep=''), row.names= F)
-#write.csv(Result,paste(saveHere,'/Results6.csv', sep=''), row.names= F)
+write.csv(elev,paste(saveHere,'/elev.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'/Results6.csv', sep=''), row.names= F)
 rm(DEM); rm(wshdPolyOptions); rm(elev); rm(e)
 
 
@@ -365,8 +378,8 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
 
 # Add to final results
 Result <- merge(Result,slp, by='StationID')  # only join on StationID bc slope data same for all years
-#write.csv(slp,paste(saveHere,'/slp.csv', sep=''), row.names= F)
-#write.csv(Result,paste(saveHere,'/Results7.csv', sep=''), row.names= F)
+write.csv(slp,paste(saveHere,'/slp.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'/Results7.csv', sep=''), row.names= F)
 rm(slope); rm(wshdPolyOptions); rm(slp); rm(e)
 
 
@@ -393,8 +406,8 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
 
 # Add to final results
 Result <- merge(Result,rain, by='StationID')  # only join on StationID bc rain data same for all years
-#write.csv(rain,paste(saveHere,'/rain.csv', sep=''), row.names= F)
-#write.csv(Result,paste(saveHere,'/Result8.csv', sep=''), row.names= F)
+write.csv(rain,paste(saveHere,'/rain.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'/Result8.csv', sep=''), row.names= F)
 rm(rainfall); rm(wshdPolyOptions); rm(wshdPointOptions); rm(rain); rm(e)#remove raster to increase memory availability
 
 
@@ -444,8 +457,8 @@ population <- left_join(pop2000results, pop2010results, by = 'StationID') %>%
 
 # Add to final results
 Result <- left_join(Result,population,by='StationID') # only join on StationID bc elevation data same for all years
-#write.csv(Result,paste(saveHere,'Result9.csv'), row.names= F)
-#write.csv(pop,paste(saveHere,'/pop.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'Result9.csv'), row.names= F)
+write.csv(pop,paste(saveHere,'/population.csv', sep=''), row.names= F)
 rm(population); rm(pop2010results); rm(pop2000results); rm(wshdPolyOptions)
 
 
@@ -512,8 +525,8 @@ roadFinal <- roadSummary(roaddf, uniqueWshdListYear)
 
 # Add to final results
 Result <- left_join(Result,roadFinal, by=c('StationID','YearSampled'))
-#write.csv(Result,paste(saveHere,'Result10.csv'), row.names= F)
-#write.csv(roaddf,paste(saveHere,'roaddf.csv', sep=''), row.names= F)
+write.csv(Result,paste(saveHere,'Result10.csv'), row.names= F)
+write.csv(roaddf,paste(saveHere,'roaddf.csv', sep=''), row.names= F)
 
 rm(testnhd);rm(wshdPolyOptions); rm(testroads); rm(roads1); rm(roaddf); rm(roadFinal); rm(stationsToProcess)
 
