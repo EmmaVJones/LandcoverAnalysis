@@ -8,6 +8,11 @@ output: html_notebook
 
 This notebook overviews the data organization behind the landcover analysis tools. The landcover scripts output a number of metrics describing watershed and riparian land use as well as watershed scale impervious surfaces, VPDES permits, dams stream network metrics, elevation, slope, rainfall, population, and road density metrics. 
 
+
+## Projection information
+
+Quick note on projections. Previous analyses were done in Albers equal area, but sf package in R has troubles dealing with the proj4string for that projection (issue with GRS80 != NAD83 but st_transform couldn't handle the proj4string from ESRI to do an exact match). Anyway, given that it is inefficient to rely on Esri ArcGIS just for a projection transformation, we moved all spatial data to NAD83 (EPSG 4269) on January 21, 2020 and are henceforth using that crs for all analyses to keep everything in R. 
+
 ### NLCD data
 
 NLCD data is available for download from the multi-resolution land characteristics consortium (https://www.mrlc.gov/) with data downloads for the following years available: 2001, 2006, 2011, 2013, and 2016 at the time of writing this document.
@@ -50,6 +55,5 @@ At present the population data is limited to just Virginia block pop data. No ot
 The TIGER road network was previously built on just 2010 data to split the window data was collected in (about 2001-2015 at the time of programming). The reason for the single year of data was because of the labor intensive process required to acquiring and combining tiger road data (available by county only at higher resolutions). In 2019, Emma Jones built a script that scrapes all available tiger road data for a given year from the US census FTP site. The script then unzips all files for Virginia and combines into a single shapefile for further spatial analyses. The data is available yearly from 2006. 
 
 The script to pull a new years worth of data is called tigerRoadsWebScrapingScript.R
-
 
 
