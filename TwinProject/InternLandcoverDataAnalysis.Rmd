@@ -7,6 +7,17 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+# Run in R 3.6.2
+library(tidyverse) # Version 1.2.1
+library(readxl) # Version 1.3.1
+library(CDFt)
+library(sf)
+library(ggthemes)
+```
+
+
+```{r}
+.libPaths()
 ```
 
 ## R Markdown- Background
@@ -44,9 +55,9 @@ In the MS Excel spreadsheet, there are three sheets. The first sheet is a data d
 # This is a relative path name based off where your project is located
 # You may need to change where R is looking for this file if your directory
 #   structure is different than mine
-humanShed <- read_excel('Results/Interns2019/FirstOrderResults2001_2016.xlsx',
+humanShed <- read_excel('data/Results/FirstOrderResults2001_2016.xlsx',
                     sheet = 'Human Results')
-autoShed <- read_excel('Results/Interns2019/FirstOrderResults2001_2016.xlsx',
+autoShed <- read_excel('data/Results/FirstOrderResults2001_2016.xlsx',
                     sheet = 'Automated Results')
 ```
 
@@ -80,6 +91,9 @@ autoShed <- left_join(autoShed, probData, by = c('StationID','YearSampled'))
 
 Awesome. Can you figure out how to look at this new information? Hint: glimpse
 
+```{r}
+glimpse(autoShed)
+```
 
 
 ### Subset Datasets to Parameters of Interest
@@ -182,21 +196,55 @@ mutate(humanShed, type = 'Human') %>%
   
 ```
 
+And let's also make a scatterplot to show differences
+
+```{r bioregion area scatterplot}
+# combine to single dataset and plot, a bit advanced here but you can replicate
+mutate(humanShed, type = 'Human') %>%
+  bind_rows(mutate(autoShed, type = 'Automated')) %>%
+  ggplot(aes( x = BioRegion, y = totalArea_sqMile, color = type)) +
+  geom_point()
+```
+
 
 
 To make further analyses easier, we will subset the full dataset into three separate datasets by bioregion. 
 
 ```{r bioregion subsets}
-humanShed_Mountain <- filter(humanShed, BioRegion == 'Mountain')
-humanShed_Piedmont <- filter(humanShed, BioRegion == 'Piedmont')
-humanShed_Coast <- filter(humanShed, BioRegion == 'Coast')
+# First smash all the data into a single dataset and mark whether it came from automated or human dataset originally
+allData <- mutate(humanShed, type= 'Human') %>%
+  bind_rows(mutate(autoShed, type='Auto'))
+# turn BioRegion and type variables into factors such that anova works
+allData$BioRegion <- as.factor(allData$BioRegion)
+allData$type <- as.factor(allData$type)
 
-autoShed_Mountain <- filter(autoShed, BioRegion == 'Mountain')
-autoShed_Piedmont <- filter(autoShed, BioRegion == 'Piedmont')
-autoShed_Coast <- filter(autoShed, BioRegion == 'Coast')
+
+# then divide these into separate datasets 
+humanShed_Mountain <- filter(allData, type == 'Human' & BioRegion == 'Mountain')
+humanShed_Piedmont <- filter(allData, type == 'Human' & BioRegion == 'Piedmont')
+humanShed_Coast <- filter(allData, type == 'Human' & BioRegion == 'Coast')
+
+autoShed_Mountain <- filter(allData, type == 'Auto' & BioRegion == 'Mountain')
+autoShed_Piedmont <- filter(allData, type == 'Auto' & BioRegion == 'Piedmont')
+autoShed_Coast <- filter(allData, type == 'Auto' & BioRegion == 'Coast')
+
 ```
 
-Now we will run cvm on each subpopulation. 
+
+First let's do a parametric test on the bioregional differences. Instead of doing multiple t tests, it's best to do what is called an anova because it improves your statistical power for testing multiple categorical variables in a dataset. We are going to do a two way anova because we are testing human vs automated results (1) by (*) Mountain vs Piedmont vs Coast (1) = 2 way anova.
+
+
+```{r totalArea_sqMile anova by bioregion}
+summary(
+  aov(data = allData, 
+      totalArea_sqMile ~ type * BioRegion))
+
+```
+
+Area ANOVA Interpretation: The BioRegion is the only significant p value (0.000829 is way less than 0.05, note the *** shows that it is significant at the 0.001 level). But that doesn't tell us much about our methods bc it's only comparing if the area is different between Mountain/Piedmont/Coast. The type (Human vs Auto) is not significant, nor is the interaction of type and BioRegion (meaning the relationship between the area and bioregion tested is not dependent on delineation method). 
+
+
+Now we will run a nonparametric test (cvm) on each subpopulation. 
 
 ```{r area cvm by bioregion}
 
@@ -223,6 +271,155 @@ rm(CVM_Area_C); rm(CVM_Area_M);rm(CVM_P_Area); rm(CVM_Area_P)
 ```
 
 
+## PFOR Analysis
+
+#### Exploratory Data Analysis
+
+It's always good to have an idea of what your data look like before diving into statistical analyses. Here we make a histogram using ggplot2 package to see how our watershed area data fall.
+
+```{r watershed area histogram}
+# First the human results
+ggplot(data = humanShed, aes(x = PFOR)) +
+  geom_histogram()
+
+# Then automated results
+ggplot(data = autoShed, aes(x = PFOR)) +
+  geom_histogram()
+```
+
+Looks like we are getting the same shape for both datasets- right (positive) skew, non normal (non parametric) data. Exactly what we expected from environmental datasets.
+
+#### Parametric Analysis
+
+Now let's run a students t test on the two datasets to compare their means. A t test is a parametric analysis technique, but we will still use it to get an idea of what our data are telling us.
+
+```{r area t test}
+t.test(humanShed$PFOR, autoShed$PFOR)
+```
+
+The t test with an alpha level of 0.05 (default value for t.test() ) indicates the means of the two datasets are not significantly different (p value = 0.8527).
+
+
+#### Non Parametric Analysis
+
+Now let's try a non parametric analysis, a cramer von mises using the CDFt package.
+
+```{r load cramer library}
+#library(CDFt)
+```
+
+
+```{r PFOR cvm}
+CVM_PFOR <- CramerVonMisesTwoSamples(humanShed$PFOR,autoShed$PFOR)
+CVM_PFOR # print result
+
+# Convert U result from cvm to a p value
+CVM_P_PFOR<- 1/6*exp(-CVM_PFOR)  ###Convert U from cramer von mises to p-value http://hameddaily.blogspot.com/2015/01/goodness-of-fit-test-in-r.html
+
+# and turn result into a tibble (a table-like object) to make it easier to combine result later
+CVM_P_PFOR <- tibble(ID = 'Watershed Percent Forest', 
+                     cvm = CVM_PFOR,
+                     pValue = CVM_P_PFOR)
+
+```
+
+Given the large p value, it doesn't appear as though there are significant differences between the 
+
+
+#### Dig in to Bioregional differences
+
+So we really want to compare the differences in subsets of this data, meaning each of the subpopulations of the BioRegion variable. To see what our options are, let's ask R to tell us.
+
+```{r Bioregions human}
+unique(humanShed$BioRegion)
+```
+
+Can you test to see what the options are for the auto delineated dataset? Hint: they should be the same.
+
+```{r Bioregions auto}
+# enter code here
+
+```
+
+
+let's have a quick look at our dataset using a boxplot now that we know the different bioregions.
+
+```{r bioregion area boxplot}
+# combine to single dataset and plot, a bit advanced here but you can replicate
+mutate(humanShed, type = 'Human') %>%
+  bind_rows(mutate(autoShed, type = 'Automated')) %>%
+  ggplot(aes( x = BioRegion, y = PFOR, fill = type)) +
+  geom_boxplot()
+  
+```
+
+
+And let's also make a scatterplot to show differences
+
+```{r bioregion area scatterplot}
+# combine to single dataset and plot, a bit advanced here but you can replicate
+mutate(humanShed, type = 'Human') %>%
+  bind_rows(mutate(autoShed, type = 'Automated')) %>%
+  ggplot(aes( x = BioRegion, y = PFOR, color = type)) +
+  geom_point()
+```
+
+To make further analyses easier, we will subset the full dataset into three separate datasets by bioregion. 
+
+```{r bioregion subsets}
+# First smash all the data into a single dataset and mark whether it came from automated or human dataset originally
+allData <- mutate(humanShed, type= 'Human') %>%
+  bind_rows(mutate(autoShed, type='Auto'))
+
+# then divide these into separate datasets 
+humanShed_Mountain <- filter(allData, type == 'Human' & BioRegion == 'Mountain')
+humanShed_Piedmont <- filter(allData, type == 'Human' & BioRegion == 'Piedmont')
+humanShed_Coast <- filter(allData, type == 'Human' & BioRegion == 'Coast')
+
+autoShed_Mountain <- filter(allData, type == 'Auto' & BioRegion == 'Mountain')
+autoShed_Piedmont <- filter(allData, type == 'Auto' & BioRegion == 'Piedmont')
+autoShed_Coast <- filter(allData, type == 'Auto' & BioRegion == 'Coast')
+```
+
+First let's do a parametric test on the bioregional differences. Instead of doing multiple t tests, it's best to do what is called an anova because it improves your statistical power for testing multiple categorical variables in a dataset. We are going to do a two way anova because we are testing human vs automated results (1) by (*) Mountain vs Piedmont vs Coast (1) = 2 way anova.
+
+
+```{r PFOR anova by bioregion}
+summary(
+  aov(data = allData, 
+      PFOR ~ type * BioRegion))
+
+```
+
+Area ANOVA Interpretation: The BioRegion is the only significant p value (0.000829 is way less than 0.05, note the *** shows that it is significant at the 0.001 level). But that doesn't tell us much about our methods bc it's only comparing if the area is different between Mountain/Piedmont/Coast. The type (Human vs Auto) is not significant, nor is the interaction of type and BioRegion (meaning the relationship between the area and bioregion tested is not dependent on delineation method). 
+
+
+Now we will run cvm on each subpopulation. 
+
+```{r PFOR cvm by bioregion}
+
+CVM_PFOR_M <- tibble(ID = 'Watershed Percent Forest Mountain',
+                     cvm = CramerVonMisesTwoSamples(humanShed_Mountain$PFOR,
+                                       autoShed_Mountain$PFOR))
+CVM_PFOR_P <- tibble(ID = 'Watershed Percent Forest Piedmont',
+                     cvm = CramerVonMisesTwoSamples(humanShed_Piedmont$PFOR,
+                                       autoShed_Piedmont$PFOR))
+CVM_PFOR_C <- tibble(ID = 'Watershed Percent Forest Coast',
+                     cvm = CramerVonMisesTwoSamples(humanShed_Coast$PFOR,
+                                       autoShed_Coast$PFOR))
+
+# Combine to single tibble
+CVM_PFOR <- rbind(CVM_PFOR_M, CVM_PFOR_P, CVM_PFOR_C) %>%
+  # Convert U result from cvm to a p value, all at once
+  mutate(pValue = 1/6*exp(-cvm)) %>% # Convert U from cramer von mises to p-value
+  # Combine with result from full dataset
+  bind_rows(CVM_P_PFOR) %>%
+  arrange(ID) # reorder alphabetically 
+
+# Clean up workspace to get rid of all the extra objects made in the process
+rm(CVM_PFOR_C); rm(CVM_PFOR_M);rm(CVM_P_PFOR); rm(CVM_PFOR_P)
+```
+
 ## Rinse and repeat
 
 now you are going to do the same analyses for each of the parameters of interest statewide and then break it down by bioregion. All you need to do is copy the code from above and replace the area variable with each of the parameters of interest.
@@ -241,7 +438,7 @@ When you are finished, you can combine your results into a single object and sav
 allResults <- rbind(CVM_Area, CVM_PFOR, CVM_PWETL, CVM_RFOR30, 
                     CVM_MunMinor, CVM_siteRain_mmyr, CVM_ELEVMEAN)
 # save results
-write.csv(allResults, 'CVM_results.csv', row.names = FALSE)
+write.csv(allResults, 'data/Results/CVM_results.csv', row.names = FALSE)
 
 ```
 
@@ -259,17 +456,17 @@ library(sf)
 First, we need spatial data in order to make maps. But notice in the glimpse() above that there is no actual spatial information for us to plot in the results (no latitude/longitude information or shapes for the polygons). We will need to bring in the raw spatial data you all processed in order to make maps. 
 
 ```{r bring in spatial data}
-wshdPolys <- st_read('GISdata/InternSpatialData/final/TwinWatersheds_prj.shp') %>% # watersheds
+wshdPolys <- st_read('GISdata/TwinWatersheds_prj.shp') %>% # watersheds that were created using automated delineation technique
   st_transform(4326) #reproject to WGS84 for mapping
-wshdSites <- st_read('GISdata/InternSpatialData/final/TwinSites_prj.shp') %>% # points
+wshdSites <- st_read('GISdata/TwinSites_prj.shp') %>% # points
     st_transform(4326) #reproject to WGS84 for mapping
 ```
 
 And we will bring in a few base layers to make the maps a bit more understandable: a Virginia state outline and US EPA Level III Ecoregions. 
 
 ```{r bring in baselayers}
-VAoutline <- st_read('GISdata/InternSpatialData/mapData/Va_otlne.shp')
-VAecoregions <- st_read('GISdata/InternSpatialData/mapData/VA_level3ecoregion.shp')
+VAoutline <- st_read('GISdata/mapData/Va_otlne.shp')
+VAecoregions <- st_read('GISdata/mapData/VA_level3ecoregion.shp')
 ```
 
 The ecoregions brought in don't quite match the way we analyzed our dataset above (Mountain, Piedmont, Coast). Have a look at what came in:
@@ -357,4 +554,5 @@ ggsave("watershedPlot.png", plot = watershedPlot, width = 6, height = 6, dpi = "
 ggsave("bioregionPlot.png", plot = bioregionPlot, width = 6, height = 6, dpi = "screen")
 
 ```
+
 
