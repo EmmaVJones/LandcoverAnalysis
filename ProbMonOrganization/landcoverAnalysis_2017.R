@@ -1,36 +1,3 @@
-# First data must be organized using a function built by Emma 
-library(tidyverse)
-library(sf)
-
-source('organizeShapefiles.R')
-
-combineSpatialData(inDirectoryName = 'GISdata/InternSpatialData/final/Watersheds', # Where are the files in question stored? (Relative or absolute path name)
-                   outDirectoryName = 'GISdata/InternSpatialData/final', # Where should the combined file be saved? (Relative or absolute path name)
-                   outShapefileName = 'TwinWatersheds_prjNAD83', # What do you want to call the shapefile?
-                   shapefileType = 'watershed' # Are we dealing with watershed or site data? 
-                   )
-
-
-combineSpatialData(inDirectoryName = 'GISdata/InternSpatialData/final/Sites', # Where are the files in question stored? (Relative or absolute path name)
-                   outDirectoryName = 'GISdata/InternSpatialData/final', # Where should the combined file be saved? (Relative or absolute path name)
-                   outShapefileName = 'TwinSites_prjNAD83', # What do you want to call the shapefile?
-                   shapefileType = 'site' # Are we dealing with watershed or site data? 
-)
-
-combineSpatialData(inDirectoryName = 'GISdata/InternSpatialData/NewDelineations/Watersheds', # Where are the files in question stored? (Relative or absolute path name)
-                   outDirectoryName = 'GISdata/InternSpatialData/final', # Where should the combined file be saved? (Relative or absolute path name)
-                   outShapefileName = 'TwinWatersheds_new', # What do you want to call the shapefile?
-                   shapefileType = 'watershed' # Are we dealing with watershed or site data? 
-)
-
-
-combineSpatialData(inDirectoryName = 'GISdata/InternSpatialData/NewDelineations/Sites', # Where are the files in question stored? (Relative or absolute path name)
-                   outDirectoryName = 'GISdata/InternSpatialData/final', # Where should the combined file be saved? (Relative or absolute path name)
-                   outShapefileName = 'TwinSites_new', # What do you want to call the shapefile?
-                   shapefileType = 'site' # Are we dealing with watershed or site data? 
-)
-
-
 ## Note: For elevation and rainfall standard deviation (sd) calculations where more than one
 ## watershed polygon is used to describe one StationID the sd of the watershed is reported as
 ## the average of all individual watershed standard deviations. For the most accurate results
@@ -38,53 +5,113 @@ combineSpatialData(inDirectoryName = 'GISdata/InternSpatialData/NewDelineations/
 
 library(tidyverse)
 library(raster)
-#library(rgdal)
-#library(maptools)
-#library(rgeos)
-#library(reshape)
-#library(reshape2)
+library(rgdal)
+library(maptools)
+library(rgeos)
+library(reshape)
+library(reshape2)
 library(sf)
 
 
 # Establish a GIS working directory
 # This is where you will source all static GIS data for the project (not your input watersheds)
-wd <- "F:/evjones/GIS/ProbMonGIS/GISdata"
+wd <- "D:/evjones/GIS/ProbMonGIS/GISdata"
 
 # Where do you want to save the outputs? 
-saveHere <- 'Results/Interns2019/StreamStats/new/'
+saveHere <- 'Results/Prob2017_2018/2017/'
 
 
 # Bring in watersheds
-wshdPolys <- st_read('GISdata/InternSpatialData/final/TwinWatersheds_new.shp') %>%
+#just 2017
+wshdPolys <- st_read('D:/evjones/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2017_final_EVJ.shp') %>%
   dplyr::select(StationID) %>%
   mutate(StationID = sub("\r\n" ,"",StationID)) # get rid of any stray spaces after StationID in attribute table
+# Bring in all sampled in 2017 to find which ones missing from above shapefile (trend sites)
+x2017 <- readxl::read_excel('C:/HardDriveBackup/ProbMon/2017/EmmaGIS2017.xlsx',
+                            sheet = 'GIScrossWalk2017') %>%
+  filter(!is.na(DEQSITEID) & !(DEQSITEID == 'N/A')) %>% # drop sites that weren't sampled for various reasons in `Sample Code` column
+  filter(!str_detect(`Sample Code`,'PD|OT|NT')) %>% # drop more sites that weren't sampled permission denied, other, non target
+  arrange(DEQSITEID) 
+X2017missing <- filter(x2017, !DEQSITEID %in% wshdPolys$StationID)
 
-wshdSites <- st_read('GISdata/InternSpatialData/final/TwinSites_new.shp') %>%
-  dplyr::select(StationID)%>%
-  mutate(StationID = sub("\r\n" ,"",StationID)) # get rid of any stray spaces after StationID in attribute table
+
+# Bring in all watersheds to grab those for missing trend sites
+allWatersheds <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
+  filter(StationID %in% X2017missing$DEQSITEID) %>%
+  dplyr::select(StationID)
+
+# add these sites to wshdPolys for new spatial data
+wshdPolys <- rbind(wshdPolys, allWatersheds)
+# anything missing???
+wshdPolys$StationID[!(wshdPolys$StationID %in% x2017$DEQSITEID )]
+# cool 
+rm(X2017missing); rm(allWatersheds)
+
+## Make sites object
+wshdSites <- x2017 %>%
+  mutate(StationID = sub("\r\n" ,"",DEQSITEID), # get rid of any stray spaces after StationID in attribute table
+         StationID_Trend = case_when(str_detect(SITEID, '_') ~ SITEID,
+                                     TRUE ~ StationID)) %>% # keep trend names for repeated sites, but keep original name if not trend-ized
+  dplyr::select(StationID, StationID_Trend, LAT_DD, LONG_DD) 
+
+# Get missing trend lat/longs
+allSites <- st_read('GISdata/AllStations_through2016.shp') %>% 
+  filter(StationID %in% wshdSites$StationID) %>%
+  st_drop_geometry() %>%
+  dplyr::select(StationID, Latitude, Longitude)
+
+wshdSites <- left_join(wshdSites, allSites, by = 'StationID') %>%
+  mutate(LAT_DD = case_when(is.na(LAT_DD) ~ Latitude, TRUE ~ LAT_DD),
+         LONG_DD = case_when(is.na(LONG_DD) ~ Longitude, TRUE ~ LONG_DD)) %>%
+  dplyr::select(-c(Latitude, Longitude)) %>%
+  st_as_sf(coords = c("LONG_DD", "LAT_DD"),  # make spatial layer using these columns
+           remove = T, # don't remove these lat/lon cols from df
+           crs = 4326) # add coordinate reference system, needs to be geographic for now bc entering lat/lng, 
 
 
 # Critical Link (file with StationID's linked to year sampled for correct NLCD)
 # This file must have fields: StationID and Year_ where StationID=DEQStationID that
 #   matches input watershed StationID's and Year_ is year sampled
-criticalLink <- read_csv('C:/HardDriveBackup/R/GitHub/ProbMon-Integrated-Reports/2018/processedData/Wadeable_ProbMon_2001-2016_EVJ.csv')%>%
-  dplyr::select(StationID,Year,StationID_Trend,EcoRegion,BioRegion,Order,StreamSizeCat)%>%
-  dplyr::rename(YearSampled=Year)
+#criticalLink <- read_csv('C:/HardDriveBackup/R/GitHub/ProbMon-Integrated-Reports/2018/processedData/Wadeable_ProbMon_2001-2016_EVJ.csv')%>%
+#  dplyr::select(StationID,Year,StationID_Trend,EcoRegion,BioRegion,Order,StreamSizeCat)%>%
+#  dplyr::rename(YearSampled=Year)
 
-years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
-  mutate(year = ifelse(!is.na(YearSampled),YearSampled,2016), # get rid of NA's, replace with 2016 for now bc most recent NLCD release
-         NLCD = case_when( between(year, 2000, 2003) ~ 2001, 
-                           between(year, 2004, 2008) ~ 2006,
-                           between(year, 2009, 2013) ~ 2011,
-                           between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
+#years <- filter(criticalLink, StationID %in% wshdPolys$StationID) %>%
+#  mutate(year = ifelse(!is.na(YearSampled),YearSampled,2016), # get rid of NA's, replace with 2016 for now bc most recent NLCD release
+#         NLCD = case_when( between(year, 2000, 2003) ~ 2001, 
+#                           between(year, 2004, 2008) ~ 2006,
+#                           between(year, 2009, 2013) ~ 2011,
+#                           between(year, 2014, 2020) ~ 2016)) # the upper bound of this will need to be changed when new NCLD released
 
 
 
-wshdPolys <- left_join(wshdPolys, years, by = 'StationID') %>%
+wshdPolys <- #left_join(wshdPolys, years, by = 'StationID') %>%
+  mutate(wshdPolys, YearSampled = 2017,
+         NLCD = case_when( between(YearSampled, 2000, 2003) ~ 2001,
+                           between(YearSampled, 2004, 2008) ~ 2006,
+                           between(YearSampled, 2009, 2013) ~ 2011,
+                           between(YearSampled, 2014, 2020) ~ 2016)) %>% # the upper bound of this will need to be changed when new NCLD released
   # make sure there is a point for each watershed or rainfall will bomb out
   filter(StationID %in% unique(wshdSites$StationID)) %>%
   # make sure every watershed has a NLCD year
   filter(!is.na(NLCD))
+
+
+
+
+
+
+
+
+
+##### for a deadline, remove boatable sites from processing to speed data processing ######
+boatable <- filter(x2017, str_detect( `Sample Code`,'boatable')) %>%
+  pull(DEQSITEID)
+
+wshdPolys <- filter(wshdPolys, !StationID %in% boatable)
+wshdSites <- filter(wshdSites, !StationID %in% boatable)
+
+
 
 # use this variable for sifting through unique watersheds for things that don't vary by sample year, 
 # e.g. permit counts, dam counts, stream length, elevation, slope, rainfall
@@ -171,7 +198,7 @@ finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=N
                             ,RTotBAR30=NA,RHUM30=NA,RURB30=NA,RMBAR30=NA,RAGT30=NA,RAGP30=NA,RAGC30=NA
                             ,RNAT120=NA,RFOR120=NA,RWETL120=NA,RSHRB120=NA,RNG120=NA,RBAR120=NA
                             ,RTotBAR120=NA,RHUM120=NA,RURB120=NA,RMBAR120=NA,RAGT120=NA,RAGP120=NA,RAGC120=NA) 
-finalRiparianTemplate <- finalRiparian
+
 
 
 for(i in 1:nrow(uniqueWshdListNLCD)){
@@ -190,8 +217,8 @@ for(i in 1:nrow(uniqueWshdListNLCD)){
   # Assign StationID to line segments pertaining to each polygon StationID
   if(nrow(testnhd)==0){
     # do all the joining in case watershed sampled multiple years
-    blank <- finalRiparianTemplate %>%
-      mutate(StationID = uniqueWshdListNLCD$StationID[i],
+    blank <- finalRiparian %>%
+      mutate(StationID = uniqueWshdListNLCDYear$StationID[i],
              NLCD = uniqueWshdListNLCD$NLCD[i]) %>%
       left_join(uniqueWshdListNLCDYear, by = c('StationID','NLCD')) %>%
       dplyr::select(-c(YearSampled.x)) %>%
@@ -207,9 +234,9 @@ for(i in 1:nrow(uniqueWshdListNLCD)){
 
 Result <- left_join(landusewide,finalRiparian, by=c('StationID','YearSampled','NLCD'))
 
-write.csv(finalRiparian,paste(saveHere,'finalRiparian.csv',sep=''), row.names= F)
+write.csv(finalRiparian,paste(saveHere,'finalRiparian3.csv',sep=''), row.names= F)
 write.csv(Result,paste(saveHere,'Result1.csv',sep=''), row.names= F)
-rm(testnhd); rm(finalRiparian);rm(finalRiparianTemplate);rm(blank)
+rm(testnhd); rm(finalRiparian)
 rm(landcover2001);rm(landcover2006);rm(landcover2011); rm(landcover2016)#remove raster to increase memory availability
 rm(template);rm(nhd);rm(wshdPolyOptions); rm(landusewide)
 
@@ -460,8 +487,7 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
 rm(pop2000); rm(pop_)
 
 # 2000 and 2010 are read in separately to keep functions running faster and minimize data sitting in memory
-pop2010 <-  st_read(paste0(wd,'/pop2010final.shp')) %>% 
-  st_transform(st_crs(wshdPolys))
+pop2010 <-  st_read(paste0(wd,'/pop2010final.shp'))
 
 pop2010results <- data.frame(StationID=NA,wshdPOP2010=NA,POPDENS2010= NA)
 
@@ -557,7 +583,7 @@ Result <- left_join(Result,roadFinal, by=c('StationID','YearSampled'))
 write.csv(Result,paste0(saveHere,'Result10.csv'), row.names= F)
 write.csv(roaddf,paste0(saveHere,'roaddf.csv', sep=''), row.names= F)
 
-rm(testnhd);rm(nhd);rm(wshdPolyOptions); rm(testroads); rm(roads1); rm(roaddf); rm(roadFinal); rm(stationsToProcess)
+rm(testnhd);rm(wshdPolyOptions); rm(testroads); rm(roads1); rm(roaddf); rm(roadFinal); rm(stationsToProcess)
 
 
 
