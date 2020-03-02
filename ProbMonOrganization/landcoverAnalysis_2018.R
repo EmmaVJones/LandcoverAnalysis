@@ -18,7 +18,7 @@ library(sf)
 wd <- "D:/evjones/GIS/ProbMonGIS/GISdata"
 
 # Where do you want to save the outputs? 
-saveHere <- 'Results/Prob2017_2018/2018/'
+saveHere <- 'Results/ProbWadeable2013_2018/2018/'
 
 yearSampled <- 2018
 
@@ -31,7 +31,7 @@ yearSampled <- 2018
 
 
 
-#just 2017
+#just 2018
 wshdPolys <- st_read('D:/evjones/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2018_StreamStats/2018_StreamStats_watersheds.shp') %>%
   mutate(StationID = sub("\r\n" ,"",UID)) %>% # get rid of any stray spaces after StationID in attribute table
   dplyr::select(StationID) 
@@ -232,8 +232,9 @@ for(i in 1:nrow(uniqueWshdListNLCD)){
                               NLCD %in% uniqueWshdListNLCD$NLCD[i])
   
   # Subset nhd streams by each polygon
-  testnhd <- suppressWarnings(st_intersection(nhd, wshdPolyOptions[1,])) %>% # only need to use one polygon to do analysis
+  testnhd <- suppressWarnings(st_intersection(nhd, st_buffer(wshdPolyOptions[1,], 0))) %>% # only need to use one polygon to do analysis
     mutate(StationID = unique(wshdPolyOptions$StationID), NLCDyear = unique(wshdPolyOptions$NLCD))
+  # st_buffer(polygon, 0) fixes any unintended topology errors in the above step
   
   # Assign StationID to line segments pertaining to each polygon StationID
   if(nrow(testnhd)==0){
@@ -386,8 +387,10 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
   wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
   
   # Subset nhd streams by each polygon
-  testnhd <- suppressWarnings(st_intersection(nhd, wshdPolyOptions[1,])) %>% # only need to use one polygon to do analysis
+  testnhd <- suppressWarnings(st_intersection(nhd, st_buffer(wshdPolyOptions[1,], 0))) %>% # only need to use one polygon to do analysis
     mutate(StationID = unique(wshdPolyOptions$StationID))
+  # st_buffer(polygon, 0) fixes any unintended topology errors in the above step
+  
   
   streams1 <- streamCalcs(testnhd, wshdPolyOptions[1,])
   streams <- rbind(streams,streams1)
@@ -580,11 +583,13 @@ for(yr in unique(uniqueWshdListYear$roadYear)){ # only need to bring in road fil
     wshdPolyOptions <- filter(wshdPolys, StationID %in% stationsToProcess$StationID[k])
     
     # Subset nhd streams by each polygon
-    testnhd <- suppressWarnings(st_intersection(nhd, wshdPolyOptions[1,])) %>% # only need to use one polygon to do analysis
+    testnhd <- suppressWarnings(st_intersection(nhd, st_buffer(wshdPolyOptions[1,], 0))) %>% # only need to use one polygon to do analysis
       mutate(StationID = unique(wshdPolyOptions$StationID))
+    # st_buffer(polygon, 0) fixes any unintended topology errors in the above step
     
-    testroads <- suppressWarnings(st_intersection(roadFile, wshdPolyOptions[1,])) %>%  # clip roads to watershed of interest
+    testroads <- suppressWarnings(st_intersection(roadFile, st_buffer(wshdPolyOptions[1,], 0))) %>%  # clip roads to watershed of interest
       mutate(roadYear = unique(stationsToProcess$roadYear)) # if multiple years sampled, correctly designate which year of roads testing
+    # st_buffer(polygon, 0) fixes any unintended topology errors in the above step
     
     roads1 <- roadCalculation(testroads, testnhd, wshdPolyOptions[1,], yr)
     roaddf <- rbind(roaddf,roads1)
