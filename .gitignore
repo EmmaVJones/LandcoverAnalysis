@@ -55,8 +55,11 @@ rsconnect/
 *.docx
 *.Rproj
 .Rproj
+*.jpg
 
 tigerRoadsPull/
 GISdata/
 renv/
 Results/
+TwinProject/data/
+TwinProject/GISdata/
