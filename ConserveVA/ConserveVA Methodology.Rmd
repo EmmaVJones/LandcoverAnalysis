@@ -10,7 +10,10 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
 library(readxl)
+library(leaflet)
+library(leafpop)
 library(mapview)
+library(inlmisc)
 ```
 
 # Proposal to Integrate Ecologically Healthy Streams into Conserve Virginia
@@ -25,13 +28,13 @@ In order to conserve and improve the least disturbed watershed as indicated by m
 ```{r}
 bugScores <- read_excel('data/Drew_All.xlsx', sheet = 'VSCI') %>%
   mutate(Method = "VSCI", SCI = `Fam SCI`) %>%
-  dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Method, SCI) %>%
+  dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI) %>%  
   bind_rows(read_excel('data/Drew_All.xlsx', sheet = 'VCPMI65-Chowan') %>%
-              mutate(Method = "VCPMI65-Chowan", SCI = `CPMI65-CHOWAN`) %>%
-              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Method, SCI)) %>%
+              mutate(Method = "VCPMI65-Chowan", SCI = `CPMI65-CHOWAN`, Order = NA) %>%
+              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI)) %>% 
   bind_rows(read_excel('data/Drew_All.xlsx', sheet = 'VCPMI63+Chowan') %>% 
-              mutate(Method = "VCPMI63+Chowan", SCI = `CPMI63+CHOWAN`) %>%
-              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Method, SCI))
+              mutate(Method = "VCPMI63+Chowan", SCI = `CPMI63+CHOWAN`, Order = NA) %>%
+              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI))
 ```
     
     + Average SCI scores by same day replicate samples, then average by stations, then filter VCPMI >56 or VSCI >72.
@@ -47,7 +50,7 @@ bugFilter <- bugScores %>%
   filter(Method == 'VSCI' && stationSCIAverage >= 72 |
            Method %in% c('VCPMI65-Chowan', 'VCPMI63+Chowan') && stationSCIAverage >= 56 ) %>% 
   distinct(StationID, .keep_all = T) %>%
-  dplyr::select(StationID, Lat, Long, Method, stationSCIAverage)
+  dplyr::select(StationID, Lat, Long, Order, Method, stationSCIAverage)
 ```
     
 * Intersect 12 digit HUCs with biological station location to identify the HUCs that may qualify for inclusion.
@@ -65,7 +68,7 @@ bugFilterHUC12 <- bugFilter %>%
   filter(!is.na(Lat) | !is.na(Long)) %>% # drop any sites missing location
   mutate(Long = ifelse(Long > 0, -(Long), Long)) %>% # make sure all sites in western hemisphere
   st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
-           remove = T, # remove these lat/lon cols from df
+           remove = F, # dont remove these lat/lon cols from df, will need later
            crs = 4326) %>% # add coordinate reference system, WGS84
   st_intersection(HUC12)
 ```
@@ -79,7 +82,7 @@ missingSites_sf <- filter(bugScores, StationID %in% missingSites) %>%
        distinct(StationID, .keep_all = T) %>%
   filter(!is.na(Lat) | !is.na(Long)) %>% # drop any sites missing location
   st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
-             remove = T, # remove these lat/lon cols from df
+             remove = T, # dont remove these lat/lon cols from df, will need later
              crs = 4326)
 
 # plot missing sites vs HUC12 layer
@@ -89,10 +92,9 @@ mapview(missingSites_sf) + mapview(HUC12)
 # Fix site outside VA (just outside of HUC12 extent)
 x4ACAN <- filter(bugFilter, StationID == '4ACAN000.80') %>% # site outside VA
    st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
-           remove = T, # remove these lat/lon cols from df
+           remove = F, # dont remove these lat/lon cols from df, will need later
            crs = 4326) %>% # add coordinate reference system, WGS84
   bind_cols(filter(HUC12, HUC12 == '030101040109') %>% # appropriate HUC12 
-              mutate(StationID = '4ACAN000.80') %>%
               st_drop_geometry())
 
 # One manual fix for where falls just outside VA border
@@ -163,16 +165,117 @@ write.csv(conventionalsCheck, 'conventionalsCheck.csv')
 
     + First, bring in the functions necessary to scrape streamstats API.
 
-
-
-
-
-
-
-
+```{r}
+source('methods/StreamStatsAutoDelineation.R')
+```
+    
+    + Then summarize delineation requirements by basin to strategize splitting up workload efficiently.
+    
 ```{r}
 bugFilterHUC12 %>%
   group_by(Basin) %>%
   summarize(total = n())
 ```
+
+    + And start delineating by Basin.
+    
+```{r}
+basin <- filter(bugFilterHUC12, Basin == 'Potomac River Basin')
+
+basinData <- streamStats_Delineation(state= 'VA',
+                                     longitude = basin$Long, 
+                                     latitude = basin$Lat, 
+                                     UID = basin$StationID)
+```
+
+    + Then we need to organize these files and check they delineated properly.
+    
+```{r}
+# organize into appropriate files, lossy move here- automatically removes sites with no data
+watersheds <- basinData$polygon %>%
+  reduce(rbind) #%>%
+ # st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
+
+points <- basinData$point %>%
+  reduce(rbind) #%>%
+  #st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
+
+```
+    
+    + Run back out to streamstats and get anyone that is missing
+    
+```{r}
+# fix anything that is missing
+if(nrow(points) != nrow(watersheds) | nrow(basin) != nrow(watersheds)){
+  missing <- unique(
+    c(points$UID[!(points$UID %in% watersheds$UID)],
+      eachYear$StationID[!(eachYear$StationID %in% watersheds$UID)]))
+  missingDat <- filter(basin, StationID %in% missing)
+  
+  dat <- streamStats_Delineation(state= 'VA', 
+                                 longitude = missingDat$LongitudeDD, 
+                                 latitude = missingDat$LatitudeDD, 
+                                 UID = missingDat$StationID)
+  
+  watersheds_missing <- dat$polygon %>%
+    reduce(rbind)# %>%
+  #  st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
+  
+  
+  points_missing <- dat$point %>%
+    reduce(rbind) #%>%
+   # st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
+  
+  
+  watersheds <- rbind(watersheds, watersheds_missing) %>%
+    arrange(UID)
+  
+  points <- rbind(points, points_missing) %>%
+    arrange(UID)
+  
+  rm(missingDat); rm(dat); rm(watersheds_missing)
+}
+
+```
+    
+    + We are going to do manual QA for each watershed. Bring in Probabilistic Monitoring sample frame for stream order information.
+
+```{r}
+vafrm <- st_read('GIS/vafrm_99_05Albers.shp') %>%
+  st_transform(4326) # change to WGS84 for web mapping
+
+mapMe <- function(watershedChoice, pointChoice, initialData, probFrame){
+  pointChoice <- mutate(pointChoice, StationID = UID) %>%
+    left_join(initialData, by = 'StationID')
+  
+  segments <- st_intersection(probFrame, st_buffer(watershedChoice,0)) # buffer helps with topology issues
+  
+  CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE) %>%
+    #setView(-78, 37.5, zoom=6) %>%
+    addPolygons(data= watershedChoice,  color = 'black', weight = 1,
+                  fillColor='blue', fillOpacity = 0.5,stroke=0.1,
+                  group="Watershed",
+                  popup=leafpop::popupTable(watershedChoice, zcol=c('UID'))) %>%
+    addCircleMarkers(data = pointChoice, color='orange', fillColor='black', radius = 5,
+                     fillOpacity = 0.5,opacity=0.5,weight = 1,stroke=T, group="Station",
+                     label = ~UID,
+                     popup=leafpop::popupTable(pointChoice)) %>%
+    addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                       overlayGroups = c('Station','Watershed'),
+                       options=layersControlOptions(collapsed=T),
+                       position='topleft')
+    
+}
+
+# Can be reviewed one at a time
+mapMe(watersheds[1,], points[1,], bugFilter, vafrm)
+
+# or all at once
+mapMe(watersheds, points, bugFilter, vafrm)
+
+
+need to add order to initial steps and 
+```
+
+
 
