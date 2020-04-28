@@ -15,7 +15,7 @@ library(sf)
 
 # Establish a GIS working directory
 # This is where you will source all static GIS data for the project (not your input watersheds)
-wd <- "D:/evjones/GIS/ProbMonGIS/GISdata"
+wd <- "C:/HardDriveBackup/GIS/ProbMonGIS/GISdata"
 
 # Where do you want to save the outputs? 
 saveHere <- 'Results/ProbWadeable2013_2018/2018/'
@@ -24,17 +24,17 @@ yearSampled <- 2018
 
 # Bring in watersheds
 
+# first bring in pop2000 bc relatively tiny and has appropriate crs to match further layers
+pop2000 <- st_read(paste0(wd,'/pop2000final.shp'))
 
-
-# These were all delineated by StreamStats using the streamStats_Delineation() function built to 
-# automatically scrape StreamStats API for watershed data
 
 
 
 #just 2018
-wshdPolys <- st_read('D:/evjones/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2018_StreamStats/2018_StreamStats_watersheds.shp') %>%
+wshdPolys <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2018_StreamStats/2018_StreamStats_watersheds.shp') %>%
   mutate(StationID = sub("\r\n" ,"",UID)) %>% # get rid of any stray spaces after StationID in attribute table
-  dplyr::select(StationID) 
+  dplyr::select(StationID) %>%
+  st_transform(st_crs(pop2000))
 # Bring in all sampled in 2017 to find which ones missing from above shapefile (trend sites)
 x2018 <- readxl::read_excel('C:/HardDriveBackup/ProbMon/2018/EmmaGIS20172018.xlsx',
                             sheet = 'GIScrossWalk2018') %>%
@@ -46,27 +46,37 @@ x2018missing <- filter(x2018, !DEQSITEID %in% wshdPolys$StationID)
 
 if(nrow(x2018missing) > 0 ){
   # Bring in all watersheds to grab those for missing trend sites
-  allWatersheds <- st_read('GISdata/AllWatersheds_through2016.shp') %>%
-    filter(StationID %in% X2018missing$DEQSITEID) %>%
-    dplyr::select(StationID)
+  trendWatersheds <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/trend_StreamStats/trend_StreamStats_watersheds.shp') %>%
+    dplyr::rename(StationID=UID) %>%
+    filter(StationID %in% x2018missing$DEQSITEID) %>%
+    dplyr::select(StationID)%>%
+    st_transform(st_crs(pop2000))
+  
   
   # add these sites to wshdPolys for new spatial data
-  wshdPolys <- rbind(wshdPolys, allWatersheds)
+  wshdPolys <- rbind(wshdPolys, trendWatersheds)
   # anything missing???
   wshdPolys$StationID[!(wshdPolys$StationID %in% x2018$DEQSITEID )]
   # cool 
-  rm(allWatersheds)
+  rm(trendWatersheds);rm(x2018missing)
 }
 
 
 ## Make sites object, best to do this from the actual data bc trend StationID's
-wshdSites <- x2018 %>%
-  mutate(StationID = sub("\r\n" ,"",DEQSITEID), # get rid of any stray spaces after StationID in attribute table
-         StationID_Trend = case_when(str_detect(SITEID, '_') ~ SITEID,
-                                     TRUE ~ StationID)) %>% # keep trend names for repeated sites, but keep original name if not trend-ized
-  dplyr::select(StationID, StationID_Trend, LAT_DD, LONG_DD) 
+if(!('StationID_Trend' %in% names(x2018))){
+  wshdSites <- x2018 %>%
+    mutate(StationID = sub("\r\n" ,"",DEQSITEID), # get rid of any stray spaces after StationID in attribute table
+           StationID_Trend = case_when(str_detect(SITEID, '_') ~ SITEID,
+                                       TRUE ~ StationID)) %>% # keep trend names for repeated sites, but keep original name if not trend-ized
+    dplyr::rename(LatitudeDD = LAT_DD, LongitudeDD = LONG_DD) %>%
+    dplyr::select(StationID, StationID_Trend, LatitudeDD, LongitudeDD) 
+} else{
+  wshdSites <- dplyr::select(x2017, StationID, StationID_Trend, LatitudeDD, LongitudeDD) 
+  
+}
 
-if(nrow(x2018missing) > 0 ){
+
+if(nrow(wshdSites) != nrow(wshdPolys)){
   # Get missing trend lat/longs
   allSites <- st_read('GISdata/AllStations_through2016.shp') %>% 
     filter(StationID %in% wshdSites$StationID) %>%
@@ -83,11 +93,11 @@ if(nrow(x2018missing) > 0 ){
   rm(allSites)
 } else {
   wshdSites <- wshdSites %>%
-    st_as_sf(coords = c("LONG_DD", "LAT_DD"),  # make spatial layer using these columns
+    st_as_sf(coords = c("LongitudeDD", "LatitudeDD"),  # make spatial layer using these columns
              remove = T, # don't remove these lat/lon cols from df
              crs = 4326) # add coordinate reference system, needs to be geographic for now bc entering lat/lng,
-  }
-  
+}
+
 
 
 # Critical Link (file with StationID's linked to year sampled for correct NLCD)
@@ -503,7 +513,7 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
   # get watershed polygon based on StationID and NLCDyear combination
   wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
   
-  pop_ <- popCalculation(pop2000, wshdPolyOptions[1,], POP2000, 2000)
+  pop_ <- popCalculation(pop2000, st_buffer(wshdPolyOptions[1,],0), POP2000, 2000) # buffer helps with topology issues
   pop2000results <- rbind(pop2000results,pop_)
   pop2000results <- pop2000results[complete.cases(pop2000results$StationID),]
 }
@@ -522,7 +532,7 @@ for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per 
   # get watershed polygon based on StationID and NLCDyear combination
   wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
   
-  pop_ <- popCalculation(pop2010, wshdPolyOptions[1,], POP10, 2010)
+  pop_ <- popCalculation(pop2010, st_buffer(wshdPolyOptions[1,],0), POP10, 2010) # buffer helps with topology issues
   pop2010results <- rbind(pop2010results,pop_)
   pop2010results <- pop2010results[complete.cases(pop2010results$StationID),]
 }

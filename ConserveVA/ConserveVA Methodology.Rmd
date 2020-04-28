@@ -1,0 +1,178 @@
+---
+title: "ConserveVA Methodology"
+author: "Emma Jones"
+date: "4/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(readxl)
+library(mapview)
+```
+
+# Proposal to Integrate Ecologically Healthy Streams into Conserve Virginia
+In order to conserve and improve the least disturbed watershed as indicated by macroinvertebrate communities, an option to integrate Virginia Department of Environmental Quality (VDEQ) biomonitoring results into ConserveVirginia website is for VDEQ staff to create and maintain GIS layer.
+
+## VDEQ proposes to use the following methodology:
+
+* Identify those watersheds containing sites indicative of good ecological conditions based on macroinvertebrate communities (VCPMI >56 or VSCI >72) using recent data collections from across the Commonwealth. 
+
+    + Bring in VSCI, VCPMI63+Chowan, and VCPMI65-Chowan metric scores. These were queried from EDAS by VSCI > 60 or VCPMI65-Chowan/VCPMI63+Chowan > 42.
+
+```{r}
+bugScores <- read_excel('data/Drew_All.xlsx', sheet = 'VSCI') %>%
+  mutate(Method = "VSCI", SCI = `Fam SCI`) %>%
+  dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Method, SCI) %>%
+  bind_rows(read_excel('data/Drew_All.xlsx', sheet = 'VCPMI65-Chowan') %>%
+              mutate(Method = "VCPMI65-Chowan", SCI = `CPMI65-CHOWAN`) %>%
+              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Method, SCI)) %>%
+  bind_rows(read_excel('data/Drew_All.xlsx', sheet = 'VCPMI63+Chowan') %>% 
+              mutate(Method = "VCPMI63+Chowan", SCI = `CPMI63+CHOWAN`) %>%
+              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Method, SCI))
+```
+    
+    + Average SCI scores by same day replicate samples, then average by stations, then filter VCPMI >56 or VSCI >72.
+    
+```{r}
+bugFilter <- bugScores %>%
+  group_by(StationID, CollDate) %>%
+  mutate(sameDaySCIAverage = mean(SCI)) %>%
+  ungroup() %>%
+  group_by(StationID) %>%
+  mutate(stationSCIAverage = mean(sameDaySCIAverage)) %>%
+  filter(CollDate >= as.Date('2013-01-01')) %>%
+  filter(Method == 'VSCI' && stationSCIAverage >= 72 |
+           Method %in% c('VCPMI65-Chowan', 'VCPMI63+Chowan') && stationSCIAverage >= 56 ) %>% 
+  distinct(StationID, .keep_all = T) %>%
+  dplyr::select(StationID, Lat, Long, Method, stationSCIAverage)
+```
+    
+* Intersect 12 digit HUCs with biological station location to identify the HUCs that may qualify for inclusion.
+
+    + Bring in HUC12 information (VA assessment region layer).
+
+```{r}
+HUC12 <- st_read("GIS/AssessmentRegions_VA84_basins.shp")
+```
+
+    + Spatially join the bug stations that passed the reference filters with the HUC12 basin information. First drop sites missing location information as no spatial work can be done without that piece of data.
+    
+```{r}
+bugFilterHUC12 <- bugFilter %>%
+  filter(!is.na(Lat) | !is.na(Long)) %>% # drop any sites missing location
+  mutate(Long = ifelse(Long > 0, -(Long), Long)) %>% # make sure all sites in western hemisphere
+  st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
+           remove = T, # remove these lat/lon cols from df
+           crs = 4326) %>% # add coordinate reference system, WGS84
+  st_intersection(HUC12)
+```
+
+Quick QA detour to make sure all spatial info correctly joined.
+
+```{r}
+missingSites <- bugFilter$StationID[!(bugFilter$StationID %in% bugFilterHUC12$StationID)]
+
+missingSites_sf <- filter(bugScores, StationID %in% missingSites) %>% 
+       distinct(StationID, .keep_all = T) %>%
+  filter(!is.na(Lat) | !is.na(Long)) %>% # drop any sites missing location
+  st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
+             remove = T, # remove these lat/lon cols from df
+             crs = 4326)
+
+# plot missing sites vs HUC12 layer
+mapview(missingSites_sf) + mapview(HUC12) 
+
+
+# Fix site outside VA (just outside of HUC12 extent)
+x4ACAN <- filter(bugFilter, StationID == '4ACAN000.80') %>% # site outside VA
+   st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
+           remove = T, # remove these lat/lon cols from df
+           crs = 4326) %>% # add coordinate reference system, WGS84
+  bind_cols(filter(HUC12, HUC12 == '030101040109') %>% # appropriate HUC12 
+              mutate(StationID = '4ACAN000.80') %>%
+              st_drop_geometry())
+
+# One manual fix for where falls just outside VA border
+bugFilterHUC12 <- bugFilterHUC12 %>%
+  rbind(  x4ACAN  )# rbind works best for sf objects over bind_rows()
+
+rm(x4ACAN)
+```
+  
+    Make sure all sites match CEDS info. Using Roger's conventionals pull to double check
+    
+```{r}
+# Bring in 2020 IR data pull (2013-2018 data), will still need to bring in 2017&2018 sites
+# Goal: filter out all BRRO sites to get a list of which sites were sampled each year
+#  and frequency if possible
+conventionals <- read_csv('C:/HardDriveBackup/R/GitHub/Rivers-StreamsAssessment/R&S_app_v4/data/final2020data/CEDSWQM_2020_IR_DATA-CONVENTIONALS_20190305.csv') 
+conventionals$FDT_DATE_TIME2 <- as.POSIXct(conventionals$FDT_DATE_TIME, format="%m/%d/%Y %H:%M")
+
+#summary(conventionals$FDT_DATE_TIME2)
+
+# Now add recent data (2018-Nov 2019- the day Roger made the data pull)
+# already limited to BRRO (SCRO and WCRO)
+conventionals2 <- read_excel('C:/HardDriveBackup/R/GitHub/AmbientNetworkPlanning/for2020/data/CEDSWQM_CONVENTIONALS_2018+.xlsx')
+conventionals2$FDT_DATE_TIME2 <- as.POSIXct(conventionals2$FDT_DATE_TIME, format="%m/%d/%Y %H:%M")
+conventionals2$FDT_DATE_TIME <- as.character(conventionals2$FDT_DATE_TIME) # for smashing with original conventionals
+summary(conventionals2$FDT_DATE_TIME2)
+
+# filter data to just 2019 to not duplicate data from 2018
+conventionals2019 <- filter(conventionals2, FDT_DATE_TIME2 > '2018-12-31 23:59:00')
+summary(conventionals2019$FDT_DATE_TIME2)
+# cool.
+#glimpse(conventionals2019)
+
+# what is in conventionals that isn't in conventionals2019??
+names(conventionals)[!names(conventionals) %in% names(conventionals2019)]
+
+conventionalsAll <- bind_rows(conventionals,conventionals2019) %>%
+  # get groundwater sites out of here
+  filter(FDT_SPG_CODE != 'GW')
+
+conventionals <- filter(conventionalsAll, !is.na(Latitude)|!is.na(Longitude)) # remove sites without coordinates
+
+conventionals_sf <- distinct(conventionals, FDT_STA_ID, .keep_all = T) %>%
+  select(FDT_STA_ID:FDT_SPG_CODE, Latitude:STA_CBP_NAME) %>% # drop data to avoid any confusion
+  mutate(StationID = FDT_STA_ID) %>% # make a joining column for later
+  st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
+                        remove = F, # don't remove these lat/lon cols from df
+                        crs = 4326)
+
+rm(conventionalsAll);rm(conventionals2);rm(conventionals2019); rm(conventionals) # remove conventionals datasets to save memory
+
+```
+
+
+```{r}
+conventionalsCheck <- left_join(bugFilter, conventionals_sf, by = 'StationID') %>%
+  mutate( Lat = round(Lat, digits = 2), Long = round(Long, digits = 2),
+          Latitude = round(Latitude, digits = 2), Longitude = round(Longitude, digits = 2),
+    latDiff = ifelse(Lat != Latitude, 'Flag', NA),
+         lngDiff = ifelse(Long != Longitude, 'Flag', NA)) %>%
+  dplyr::select(latDiff, lngDiff, Latitude, Longitude, everything()) %>%
+  filter(latDiff == 'Flag' | lngDiff == 'Flag')
+
+write.csv(conventionalsCheck, 'conventionalsCheck.csv')
+```
+
+* The qualifying HUCs are delineated to pour point (biological station location) using StreamSTATS methodology (https://streamstats.usgs.gov/) to create watershed layer (based on the default USGS StreamStats 1:24,000 NHD layer)
+
+    + First, bring in the functions necessary to scrape streamstats API.
+
+
+
+
+
+
+
+
+```{r}
+bugFilterHUC12 %>%
+  group_by(Basin) %>%
+  summarize(total = n())
+```
+

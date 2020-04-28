@@ -63,3 +63,7 @@ renv/
 Results/
 TwinProject/data/
 TwinProject/GISdata/
+ConserveVA/data
+ConserveVA/GIS
+ConserveVA/methods
+ConserveVA/requirements
