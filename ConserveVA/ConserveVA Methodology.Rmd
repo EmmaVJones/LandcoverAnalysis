@@ -248,7 +248,7 @@ mapMe <- function(watershedChoice, pointChoice, initialData, probFrame){
   pointChoice <- mutate(pointChoice, StationID = UID) %>%
     left_join(initialData, by = 'StationID')
   
-  segments <- st_intersection(probFrame, st_buffer(watershedChoice,0)) # buffer helps with topology issues
+  segments <- suppressWarnings(st_intersection(probFrame, st_buffer(watershedChoice,0))) # buffer by 0 helps with topology issues
   
   CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE) %>%
     #setView(-78, 37.5, zoom=6) %>%
@@ -256,15 +256,17 @@ mapMe <- function(watershedChoice, pointChoice, initialData, probFrame){
                   fillColor='blue', fillOpacity = 0.5,stroke=0.1,
                   group="Watershed",
                   popup=leafpop::popupTable(watershedChoice, zcol=c('UID'))) %>%
+    addPolylines(data = segments,  color = 'blue', weight =3,
+                 group="Strahler Info", label = ~STRAHLER,
+                 popup=leafpop::popupTable(segments, zcol=c('STRAHLER'))) %>% hideGroup("Strahler Info") %>%
     addCircleMarkers(data = pointChoice, color='orange', fillColor='black', radius = 5,
                      fillOpacity = 0.5,opacity=0.5,weight = 1,stroke=T, group="Station",
                      label = ~UID,
                      popup=leafpop::popupTable(pointChoice)) %>%
     addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
-                       overlayGroups = c('Station','Watershed'),
+                       overlayGroups = c('Station',"Strahler Info", 'Watershed'),
                        options=layersControlOptions(collapsed=T),
                        position='topleft')
-    
 }
 
 # Can be reviewed one at a time
@@ -273,8 +275,6 @@ mapMe(watersheds[1,], points[1,], bugFilter, vafrm)
 # or all at once
 mapMe(watersheds, points, bugFilter, vafrm)
 
-
-need to add order to initial steps and 
 ```
 
 
