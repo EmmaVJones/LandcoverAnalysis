@@ -2,7 +2,9 @@
 title: "ConserveVA Methodology"
 author: "Emma Jones"
 date: "4/28/2020"
-output: html_document
+output:
+  html_document: 
+     code_folding: "hide"
 ---
 
 ```{r setup, include=FALSE}
@@ -25,7 +27,7 @@ In order to conserve and improve the least disturbed watershed as indicated by m
 
     + Bring in VSCI, VCPMI63+Chowan, and VCPMI65-Chowan metric scores. These were queried from EDAS by VSCI > 60 or VCPMI65-Chowan/VCPMI63+Chowan > 42.
 
-```{r}
+```{r bring in data}
 bugScores <- read_excel('data/Drew_All.xlsx', sheet = 'VSCI') %>%
   mutate(Method = "VSCI", SCI = `Fam SCI`) %>%
   dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI) %>%  
@@ -39,7 +41,7 @@ bugScores <- read_excel('data/Drew_All.xlsx', sheet = 'VSCI') %>%
     
     + Average SCI scores by same day replicate samples, then average by stations, then filter VCPMI >56 or VSCI >72.
     
-```{r}
+```{r filter by thresholds}
 bugFilter <- bugScores %>%
   group_by(StationID, CollDate) %>%
   mutate(sameDaySCIAverage = mean(SCI)) %>%
@@ -57,13 +59,13 @@ bugFilter <- bugScores %>%
 
     + Bring in HUC12 information (VA assessment region layer).
 
-```{r}
+```{r read in HUC12 layer}
 HUC12 <- st_read("GIS/AssessmentRegions_VA84_basins.shp")
 ```
 
     + Spatially join the bug stations that passed the reference filters with the HUC12 basin information. First drop sites missing location information as no spatial work can be done without that piece of data.
     
-```{r}
+```{r join HUC12}
 bugFilterHUC12 <- bugFilter %>%
   filter(!is.na(Lat) | !is.na(Long)) %>% # drop any sites missing location
   mutate(Long = ifelse(Long > 0, -(Long), Long)) %>% # make sure all sites in western hemisphere
@@ -75,7 +77,7 @@ bugFilterHUC12 <- bugFilter %>%
 
 Quick QA detour to make sure all spatial info correctly joined.
 
-```{r}
+```{r QA sites}
 missingSites <- bugFilter$StationID[!(bugFilter$StationID %in% bugFilterHUC12$StationID)]
 
 missingSites_sf <- filter(bugScores, StationID %in% missingSites) %>% 
@@ -97,16 +99,33 @@ x4ACAN <- filter(bugFilter, StationID == '4ACAN000.80') %>% # site outside VA
   bind_cols(filter(HUC12, HUC12 == '030101040109') %>% # appropriate HUC12 
               st_drop_geometry())
 
-# One manual fix for where falls just outside VA border
-bugFilterHUC12 <- bugFilterHUC12 %>%
-  rbind(  x4ACAN  )# rbind works best for sf objects over bind_rows()
 
-rm(x4ACAN)
+# Fix site in WV (incorrect lat/lng)
+x4ADAN <- filter(bugFilter, StationID == '4ADAN199.71') %>% # site in WV
+  mutate(Lat = 36.7024)
+
+
+bugFilterHUC12 <- bugFilter %>%
+  filter(!StationID == '4ADAN199.71') %>% # site in WV
+  bind_rows(x4ADAN) %>% # fixed lat/lngs
+  filter(!is.na(Lat) | !is.na(Long)) %>% # drop any sites missing location
+  mutate(Long = ifelse(Long > 0, -(Long), Long)) %>% # make sure all sites in western hemisphere
+  st_as_sf(coords = c("Long", "Lat"),  # make spatial layer using these columns
+           remove = F, # dont remove these lat/lon cols from df, will need later
+           crs = 4326) %>% # add coordinate reference system, WGS84
+  st_intersection(HUC12)
+
+# Add manual fixes back to whole dataset
+bugFilterHUC12 <- bugFilterHUC12 %>%
+  rbind(  x4ACAN  ) # rbind works best for sf objects over bind_rows()
+
+rm(x4ACAN); rm(x4ADAN)
+
 ```
   
     Make sure all sites match CEDS info. Using Roger's conventionals pull to double check
     
-```{r}
+```{r conventionals check, eval = FALSE}
 # Bring in 2020 IR data pull (2013-2018 data), will still need to bring in 2017&2018 sites
 # Goal: filter out all BRRO sites to get a list of which sites were sampled each year
 #  and frequency if possible
@@ -146,10 +165,8 @@ conventionals_sf <- distinct(conventionals, FDT_STA_ID, .keep_all = T) %>%
 
 rm(conventionalsAll);rm(conventionals2);rm(conventionals2019); rm(conventionals) # remove conventionals datasets to save memory
 
-```
 
-
-```{r}
+# the good stuff
 conventionalsCheck <- left_join(bugFilter, conventionals_sf, by = 'StationID') %>%
   mutate( Lat = round(Lat, digits = 2), Long = round(Long, digits = 2),
           Latitude = round(Latitude, digits = 2), Longitude = round(Longitude, digits = 2),
@@ -165,13 +182,13 @@ write.csv(conventionalsCheck, 'conventionalsCheck.csv')
 
     + First, bring in the functions necessary to scrape streamstats API.
 
-```{r}
+```{r bring in autodelineation functions}
 source('methods/StreamStatsAutoDelineation.R')
 ```
     
     + Then summarize delineation requirements by basin to strategize splitting up workload efficiently.
     
-```{r}
+```{r summarize sites by major basin}
 bugFilterHUC12 %>%
   group_by(Basin) %>%
   summarize(total = n())
@@ -179,8 +196,14 @@ bugFilterHUC12 %>%
 
     + And start delineating by Basin.
     
-```{r}
-basin <- filter(bugFilterHUC12, Basin == 'Potomac River Basin')
+```{r Delineate by specified basin}
+# unique basin names to choose from
+unique(bugFilterHUC12$Basin)
+
+# Choose your basin
+basinName <- 'Potomac River Basin'
+
+basin <- filter(bugFilterHUC12, Basin == basinName)
 
 basinData <- streamStats_Delineation(state= 'VA',
                                      longitude = basin$Long, 
@@ -190,21 +213,17 @@ basinData <- streamStats_Delineation(state= 'VA',
 
     + Then we need to organize these files and check they delineated properly.
     
-```{r}
+```{r organize spatial results}
 # organize into appropriate files, lossy move here- automatically removes sites with no data
 watersheds <- basinData$polygon %>%
-  reduce(rbind) #%>%
- # st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
-
+  reduce(rbind)
 points <- basinData$point %>%
-  reduce(rbind) #%>%
-  #st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
-
+  reduce(rbind) 
 ```
     
     + Run back out to streamstats and get anyone that is missing
     
-```{r}
+```{r fix missing sites (rerun as necessary)}
 # fix anything that is missing
 if(nrow(points) != nrow(watersheds) | nrow(basin) != nrow(watersheds)){
   missing <- unique(
@@ -218,14 +237,10 @@ if(nrow(points) != nrow(watersheds) | nrow(basin) != nrow(watersheds)){
                                  UID = missingDat$StationID)
   
   watersheds_missing <- dat$polygon %>%
-    reduce(rbind)# %>%
-  #  st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
-  
+    reduce(rbind)
   
   points_missing <- dat$point %>%
-    reduce(rbind) #%>%
-   # st_transform(crs="+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs")
-  
+    reduce(rbind)
   
   watersheds <- rbind(watersheds, watersheds_missing) %>%
     arrange(UID)
@@ -240,7 +255,7 @@ if(nrow(points) != nrow(watersheds) | nrow(basin) != nrow(watersheds)){
     
     + We are going to do manual QA for each watershed. Bring in Probabilistic Monitoring sample frame for stream order information.
 
-```{r}
+```{r visual QA mapping function}
 vafrm <- st_read('GIS/vafrm_99_05Albers.shp') %>%
   st_transform(4326) # change to WGS84 for web mapping
 
@@ -268,7 +283,11 @@ mapMe <- function(watershedChoice, pointChoice, initialData, probFrame){
                        options=layersControlOptions(collapsed=T),
                        position='topleft')
 }
+```
 
+    + And double check all watersheds are appropriately delineated.
+
+```{r visual QA}
 # Can be reviewed one at a time
 mapMe(watersheds[1,], points[1,], bugFilter, vafrm)
 
@@ -277,5 +296,67 @@ mapMe(watersheds, points, bugFilter, vafrm)
 
 ```
 
+    + Anything look off? If so, filter out those StationID's before they get saved to a shapefile. You will have to go to streamstats and manually choose the appropriate stream segment, then merge back to full basin watersheds shapefile.
+    
+```{r drop these sites for manual autodelineation}
+# identify problem sites
+dropMe <- c('1AXJI000.38')
 
+# drop the sites identified
+watersheds <- filter(watersheds, ! UID %in% dropMe)
+# note, we are not dropping the DEQ lat/lng from the points file because this is the most accurate location information
 
+# organize lat/lngs for problem sites for delineation on streamstats website
+dropMe <- tibble(StationID = dropMe) %>%
+  left_join(basin, by = 'StationID')
+dropMe
+```
+    
+For the station(s) listed above (if any):
+1. Go to https://streamstats.usgs.gov/ss/
+2. Enter each lat/lng, separated by a comma
+3. Choose the appropriate state (VA)
+4. Delineate: Use the 1:100k strahler stream order from the Order field above to choose the appropriate streamstats (1:24k) stream segment.
+5. Download Basin as a shapefile.
+6. Extract the zip file.
+7. Rename the 'globalwatershed' file to the name of the StationID
+**Pro Tip- select all four files (.dbf, .prj, .shp, .shx), press F2, paste the StationID into one file, press Enter... all renamed **
+8. Move the renamed watershed to GIS/delineations/streamStatsFixes/basinName (make sure there is a folder with the appropriate basin name)
+![directorystructure](methods/directoryStructure.png)
+
+    + Now bring back in the manually autodelineated watersheds and combine with the watersheds that passed QA filters.
+    
+```{r bring in watersheds}
+# Where did you save files relative to the working directory?
+savedHere <- 'GIS/delineations/streamStatsFixes/Potomac'
+
+# read in new watersheds after manual QA
+shapes <- gsub('.prj','',list.files( savedHere, pattern="*.prj", full.names=F))
+filenames <- paste0(savedHere, '/',shapes, '.shp')
+  
+# read in shapefiles and organize
+newSheds <- filenames %>%
+  map(st_read) %>%
+  map2(shapes,~mutate(.x,UID=.y)) %>% # make a StationID column
+  map(~dplyr::select(.,UID)) %>%
+  reduce(rbind) 
+
+# Combine with QAed watersheds
+watersheds <- rbind(watersheds, newSheds) %>%
+  arrange(UID)
+  
+```
+    
+    + Double check everything looks good in the basin.
+    
+```{r map double check}
+mapMe(watersheds, points, bugFilter, vafrm)
+```
+    + Save QAed watersheds and sites as shapefiles.
+    
+```{r save shapefiles}
+st_write(watersheds, paste0('GIS/delineations/', basinName,'_StreamStats_watersheds.shp'))
+st_write(points, paste0('GIS/delineations/', basinName,'_StreamStats_points.shp'))
+```
+    
+    
