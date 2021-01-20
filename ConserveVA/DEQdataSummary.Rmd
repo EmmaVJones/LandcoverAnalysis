@@ -1,0 +1,213 @@
+---
+title: "Conserve Virginia DEQ Data Summary"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(leaflet)
+library(inlmisc)
+library(sf)
+library(raster)
+library(readxl)
+library(DT)
+
+options(digits = 2)
+
+watersheds <- st_read('Results/forDCR/watersheds.shp') 
+HAM <- watersheds %>%
+  filter(UID == '2-HAM000.37') %>%
+  rename('StationID' = 'UID') 
+
+sites <- st_read('Results/forDCR/sites.shp')
+
+HAMsite <- sites %>%
+  filter(UID == '2-HAM000.37') %>%
+  rename('StationID' = 'UID')
+
+HAM_NHD <- st_read('GIS/vafrm_99_05Albers.shp') %>%
+  st_transform(4326) %>% 
+  st_intersection(., st_buffer(HAM,0)) %>%
+  rename('Strahler Order (1:100k NHD):' = 'STRAHLER')
+
+HAM_rip <- HAM_NHD %>%
+  st_combine() %>%
+  st_transform(crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") %>% #transform for buffering
+  st_buffer(dist = 120) %>%
+  st_transform(4326) # transform for mapping
+  
+landcover2016 <- raster("GIS/nlcd2016_HAM.TIF")
+
+```
+
+### Background
+
+In order to identify high biological quality watersheds for inclusion in the Healthy Waters Initiative, DEQ has conducted a thorough review of biological monitoring data to identify least disturbed sites sampled throughout the Commonwealth. DEQ includes associated watersheds and riparian buffer land use information for consideration on where conservation efforts may be most beneficial.
+
+All analyses and visualizations were produced in [R](https://www.R-project.org/), an open source statistical language. 
+
+### Biological Analysis
+
+Biological monitoring of streams and rivers is an integral component of DEQ’s water quality monitoring program. Biomonitoring allows DEQ to assess the overall ecological condition of streams and rivers by evaluating stream condition with respect to suitability for support of aquatic communities. In Virginia, benthic macroinvertebrate communities are used as indicators of ecological condition and to address the question of whether a waterbody supports the aquatic life designated use.
+
+DEQ uses multimetric macroinvertebrate indices, specifically the Virginia Stream Condition Index (VSCI) and the Virginia Coastal Plain Macroinvertebrate Index (VCPMI), to assess the aquatic life use status of wadeable streams and rivers. The VSCI and the VCPMI are applied to biomonitoring data collected in freshwater non-coastal areas and freshwater coastal areas, respectively. These indices include several biological metrics that are regionally calibrated to the appropriate reference condition (DEQa 2006; DEQ 2013). Results are calculated into a single value, or score, that is sensitive to a wide range of environmental stressors.
+
+To identify recently sampled, high quality sites, DEQ filtered all stations sampled since 2013, averaged SCI scores, and removed sites that fell below VSCI scores of 72 or VCPMI score of 56. Best professional judgement removed additional sites that met biological thresholds but did not uphold the qualification of "best available."
+
+### Spatial Analysis
+
+Upstream watersheds of all stations meeting biological filters were delineated using [USGS StreamStats](https://streamstats.usgs.gov/docs/streamstatsservices/#/) watershed delineation tool. Stream segments ( [1:100k National Hydrography Dataset](https://www.usgs.gov/core-science-systems/ngp/national-hydrography/national-hydrography-dataset)
+) contained within each of these watersheds were buffered by 120 meters to identify a consistent riparian buffer area. Land use within the riparian buffer was analyzed using the most recent National Land Cover Database ( [2016 NLCD](https://www.mrlc.gov/data/type/land-cover)). Total watershed area, riparian buffer area, and riparian land use metrics are provided to DCR for further review.
+
+
+### Results 
+
+```{r}
+# round to two digits for whole df, https://stackoverflow.com/questions/29875914/rounding-values-in-a-dataframe-in-r
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+#e.g. round_df(data, 3)
+
+results <- read_excel('Results/forDCR/Results.xlsx', sheet = 'Landcover_Results') %>%
+  round_df(., 2)
+nestedSubwatersheds <- read_excel('Results/forDCR/Results.xlsx', sheet = 'nested_Subwatersheds') 
+nestedSubwatersheds_long <- nestedSubwatersheds %>%
+  pivot_longer(-`Downstream Watershed`, names_to = 'Subwatershed', values_to = 'Station') %>%
+  filter(!is.na(Station))
+
+
+riparianArea <- results %>%
+  filter(! StationID %in% nestedSubwatersheds_long$Station) %>%
+  summarize(bufferArea = sum(buffer120_areaSqMi))
+```
+
+DEQ identified `r nrow(results)` unique, high quality watersheds for DCR consideration. These sites span the Commonwealth are are not limited to one physiographic region. Stations and watersheds put forth for review by DCR are presented in the interactive map below.
+
+```{r}
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE) %>%
+  setView(-79.4, 37.7, zoom=7) %>%
+  addPolygons(data= watersheds,  color = 'black', weight = 1,
+              fillColor='blue', fillOpacity = 0.3,stroke=0.1,
+              group="Watersheds") %>%
+  addCircleMarkers(data = sites, color='orange', fillColor='black', radius = 5,
+                   fillOpacity = 0.5,opacity=0.5,weight = 1,stroke=T, group="Sites",
+                   label = ~UID,
+                   popup=paste('StationID:', sites$StationID)) %>%
+  addLayersControl(
+    baseGroups=c("Topo","Imagery","Hydrography"),
+    overlayGroups = c('Sites','Watersheds'),   
+    options=layersControlOptions(collapsed=F),
+    position='topleft')
+
+
+```
+
+
+### Nested Watersheds
+
+During analysis, a number of nested watersheds- high quality watersheds that fall completely with other high quality watersheds- were identified within the dataset. To minimize the duplication of riparian area identified for conservation, nested watersheds are removed from all riparian area statistics. DEQ calculates a total riparian area based on these high biological quality, non-overlapping watersheds at `r riparianArea$bufferArea` square miles.
+
+### Riparian Landcover Analysis Results {#buttons .tabset .tabset-fade .tabset-pills}
+
+In addition to providing the total watershed area and riparian area associated with high biological quality sites, DEQ analyzed the land use within the riparian buffer area to aid in identifying conservation priorities. All land use analyses are based on the 2016 NLCD (Jin et al. 2019). The following table details the metrics presented for consideration. All results exclusively describe the 120 meter riparian buffer area. Use the tabs below to switch between the land use results and metric definitions. All tables are interactive and can be sorted by any of the variables provided.
+
+***
+
+#### Land Use Results 
+
+```{r}
+datatable(results, rownames = F, 
+          options = list(dom='t', pageLength = nrow(results),scrollX = TRUE, scrollY = '350px'))# %>%
+#    formatRound(columns=c('x', 'y'), digits=3)
+```
+
+
+***
+
+#### Riparian Metric Definitions
+
+```{r}
+metricBreakdown <- read_excel('Results/forDCR/Results.xlsx', sheet = 'README')
+datatable(metricBreakdown, rownames = F, 
+          options = list(dom='t', pageLength = nrow(metricBreakdown),scrollX = TRUE, scrollY = '350px'))
+
+```
+
+
+***
+
+### Example Watershed 
+
+This is an interactive example of what the land use results show us about the watersheds put forward. The monitoring station, 2-HAM000.37, and watershed, located in the Blue Ridge Mountains, is used for this explanation. The 1:100k NHD stream segments contained within the watershed, associated 120 meter riparian buffer, and 2016 NLCD land use raster are presented in the map. All layers can be turned on or off using the checkboxes on the left pane, which also allows user to control the underlying base map choice.
+
+
+
+```{r map}
+pal <- colorFactor(c('#cc807a', '#d6541c','#ed0707',
+                      '#0bb32c','#0b8005','#97e657',
+                      '#d9ad29','#f7d368','#ede505'), 
+                    c('Developed, Open Space', 'Developed, Low Intensity', 
+                      'Developed, Medium Intensity', 'Deciduous Forest',
+                      'Evergreen Forest', 'Mixed Forest', 'Shrub/Scrub',
+                      'Grassland/Herbaceous','Pasture/Hay'),
+                    na.color = 'transparent')
+
+qpal <- colorQuantile(c('#cc807a', '#d6541c','#ed0707',
+                      '#0bb32c','#0b8005','#97e657',
+                      '#d9ad29','#f7d368','#ede505'), unique(landcover2016), n = 9)
+
+
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE) %>%
+  setView(-80.02, 37.41, zoom=13) %>%
+  addRasterImage(landcover2016, colors = qpal, opacity = 0.8, group = 'NLCD 2016') %>%
+  addPolygons(data= HAM,  color = 'black', weight = 1,
+              fillColor='blue', fillOpacity = 0.1,stroke=0.1,
+              group="Watershed") %>%
+  addPolygons(data= HAM_rip,  color = 'blue', weight = 1,
+              fillColor='blue', fillOpacity = 0.3,stroke=0.1,
+              group="120 meter Riparian Buffer") %>%
+  addPolylines(data = HAM_NHD,  color = 'blue', weight =3,
+               group="1:100k NHD", label = '1:100k NHD',
+               popup=leafpop::popupTable(HAM_NHD, zcol=c('Strahler Order (1:100k NHD):'))) %>%
+  addCircleMarkers(data = HAMsite, color='orange', fillColor='black', radius = 5,
+                   fillOpacity = 0.5,opacity=0.5,weight = 1,stroke=T, group="Station",
+                   label = ~StationID,
+                   popup=paste('StationID:', HAMsite$StationID)) %>%
+  addLegend(pal = pal, values = c('Developed, Open Space', 'Developed, Low Intensity', 
+                                   'Developed, Medium Intensity', 'Deciduous Forest',
+                                   'Evergreen Forest', 'Mixed Forest', 'Shrub/Scrub',
+                                   'Grassland/Herbaceous','Pasture/Hay'),
+            title = "NLCD 2016 Classification", group = 'NLCD 2016') %>% 
+  addLayersControl(
+    baseGroups=c("Topo","Imagery","Hydrography"),
+    overlayGroups = c('Station',"1:100k NHD","120 meter Riparian Buffer", 'Watershed','NLCD 2016'),   
+    options=layersControlOptions(collapsed=F),
+    position='topleft')
+
+```
+
+```{r}
+HAMdata <- filter(results, StationID == '2-HAM000.37') 
+```
+
+Turning on only the riparian buffer layer and NLCD can assist in the visualization of the landcover metrics presented in the below table. Briefly, the example riparian buffer is predominantly forested (`r format(HAMdata$PFOR, digits = 1)`%) with some human influence (U_INDEX = `r format(HAMdata$U_INDEX, digits = 1)`%), namely pasture (`r format(HAMdata$PAGP, digits = 1)`%) in the upper reaches of the watershed and roads (`r format(HAMdata$PURB, digits = 1)`%) along the stream bank in the narrow valley. The heavily forested watershed and mostly forested riparian buffer helps to mitigate the human influence in this example as the VSCI score averaged over 10 samples exceeds `r format(HAMdata$stationSCIAverage, digits=1)`.
+
+```{r}
+datatable(HAMdata, rownames = F, options = list(dom='t', scrollX = T)) 
+```
+
+### References
+
+Jin, S., Homer, C.G., Yang, L., Danielson, P., Dewitz, J., Li, C., Zhu, Z., Xian, G., and Howard, D. 2019, Overall methodology design for the United States National Land Cover Database 2016 products. Remote Sensing, 11(24); https://doi.org/10.3390/rs11242971
+
+Virginia Department of Environmental Quality. 2013. The Virginia Coastal Plain Macroinvertebrate Index. Technical Bulletin. WQA/2013-002. Richmond, Virginia. http://www.deq.virginia.gov/Portals/0/DEQ/Water/WaterQualityMonitoring/ProbabilisticMonitoring/vcpmi.pdf.
+
+Virginia Department of Environmental Quality. 2006a.Using Probabilistic Monitoring Data to Validate the Non-Coastal Virginia Stream Condition Index. DEQ Technical Bulletin. WQA/2006-001. http://www.deq.virginia.gov/probmon/pdf/scival.pdf.

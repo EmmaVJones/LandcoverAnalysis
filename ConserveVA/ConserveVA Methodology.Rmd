@@ -16,6 +16,7 @@ library(leaflet)
 library(leafpop)
 library(mapview)
 library(inlmisc)
+library(lubridate)
 ```
 
 # Proposal to Integrate Ecologically Healthy Streams into Conserve Virginia
@@ -75,7 +76,7 @@ bugFilterHUC12 <- bugFilter %>%
   st_intersection(HUC12)
 ```
 
-Quick QA detour to make sure all spatial info correctly joined.
+    + Quick QA detour to make sure all spatial info correctly joined.
 
 ```{r QA sites}
 missingSites <- bugFilter$StationID[!(bugFilter$StationID %in% bugFilterHUC12$StationID)]
@@ -88,7 +89,7 @@ missingSites_sf <- filter(bugScores, StationID %in% missingSites) %>%
              crs = 4326)
 
 # plot missing sites vs HUC12 layer
-mapview(missingSites_sf) + mapview(HUC12) 
+#mapview(missingSites_sf) + mapview(HUC12) 
 
 
 # Fix site outside VA (just outside of HUC12 extent)
@@ -123,7 +124,7 @@ rm(x4ACAN); rm(x4ADAN)
 
 ```
   
-    Make sure all sites match CEDS info. Using Roger's conventionals pull to double check
+** Make sure all sites match CEDS info. Using Roger's conventionals pull to double check **
     
 ```{r conventionals check, eval = FALSE}
 # Bring in 2020 IR data pull (2013-2018 data), will still need to bring in 2017&2018 sites
@@ -186,12 +187,25 @@ write.csv(conventionalsCheck, 'conventionalsCheck.csv')
 source('methods/StreamStatsAutoDelineation.R')
 ```
     
-    + Then summarize delineation requirements by basin to strategize splitting up workload efficiently.
-    
+   + Then summarize delineation requirements by basin to strategize splitting up workload efficiently.
+   
 ```{r summarize sites by major basin}
 bugFilterHUC12 %>%
   group_by(Basin) %>%
-  summarize(total = n())
+  summarize(total = n()) %>%
+  mutate(`Assigned To` = case_when(Basin %in% c('Ches. Bay and Small Coastal Basin',
+                                                'Chowan and Dismal Swamp River Basin',
+                                                'York River Basin') ~ 'Kelly',
+                                   Basin == 'James River Basin' ~ 'Lucy',
+                                   Basin %in% c('New River Basin', 'Roanoke River Basin') ~ 'Royce',
+                                   Basin %in% c("Potomac River Basin","Rappahannock River Basin",
+                                                "Shenandoah River Basin") ~ "Brett",
+                                   Basin %in% c('Tennessee and Big Sandy River Basin') ~ 'Jason',
+                                   TRUE ~ as.character('Assign Me'))) %>%
+  group_by(`Assigned To`) %>%
+  mutate(Workload = sum(total)) %>%
+  arrange(Workload, `Assigned To`) %>%
+  dplyr::select(Basin, total, `Assigned To`, Workload, geometry)
 ```
 
     + And start delineating by Basin.
@@ -216,9 +230,11 @@ basinData <- streamStats_Delineation(state= 'VA',
 ```{r organize spatial results}
 # organize into appropriate files, lossy move here- automatically removes sites with no data
 watersheds <- basinData$polygon %>%
-  reduce(rbind)
+  reduce(rbind) %>%
+  arrange(UID)
 points <- basinData$point %>%
-  reduce(rbind) 
+  reduce(rbind) %>%
+  arrange(UID)
 ```
     
     + Run back out to streamstats and get anyone that is missing
@@ -227,13 +243,17 @@ points <- basinData$point %>%
 # fix anything that is missing
 if(nrow(points) != nrow(watersheds) | nrow(basin) != nrow(watersheds)){
   missing <- unique(
-    c(points$UID[!(points$UID %in% watersheds$UID)],
-      eachYear$StationID[!(eachYear$StationID %in% watersheds$UID)]))
+    c(as.character(points$UID[!(points$UID %in% watersheds$UID)]),
+      as.character(basin$StationID[!(basin$StationID %in% watersheds$UID)])))
   missingDat <- filter(basin, StationID %in% missing)
   
+  #remove missing site from the paired dataset
+  points <- filter(points, ! UID %in% missing)
+  watersheds <- filter(watersheds, ! UID %in% missing)
+  
   dat <- streamStats_Delineation(state= 'VA', 
-                                 longitude = missingDat$LongitudeDD, 
-                                 latitude = missingDat$LatitudeDD, 
+                                 longitude = missingDat$Long, 
+                                 latitude = missingDat$Lat, 
                                  UID = missingDat$StationID)
   
   watersheds_missing <- dat$polygon %>%
@@ -248,7 +268,7 @@ if(nrow(points) != nrow(watersheds) | nrow(basin) != nrow(watersheds)){
   points <- rbind(points, points_missing) %>%
     arrange(UID)
   
-  rm(missingDat); rm(dat); rm(watersheds_missing)
+  rm(missingDat); rm(dat); rm(watersheds_missing); rm(points_missing)
 }
 
 ```
@@ -265,8 +285,15 @@ mapMe <- function(watershedChoice, pointChoice, initialData, probFrame){
   
   segments <- suppressWarnings(st_intersection(probFrame, st_buffer(watershedChoice,0))) # buffer by 0 helps with topology issues
   
+#  # the kelly special
+#  leaflet(watershedChoice) %>%
+#    addProviderTiles(providers$OpenStreetMap, group='Open Street Map') %>%
+#    addProviderTiles(providers$Stamen.Terrain, group='Topo') %>%
+#    addProviderTiles(providers$Esri.WorldImagery,group='Imagery') %>%
+
+  
   CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE) %>%
-    #setView(-78, 37.5, zoom=6) %>%
+    setView(-78, 37.5, zoom=6) %>%
     addPolygons(data= watershedChoice,  color = 'black', weight = 1,
                   fillColor='blue', fillOpacity = 0.5,stroke=0.1,
                   group="Watershed",
@@ -278,7 +305,8 @@ mapMe <- function(watershedChoice, pointChoice, initialData, probFrame){
                      fillOpacity = 0.5,opacity=0.5,weight = 1,stroke=T, group="Station",
                      label = ~UID,
                      popup=leafpop::popupTable(pointChoice)) %>%
-    addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+    addLayersControl(baseGroups=c("Open Street Map","Topo","Imagery"),
+      #baseGroups=c("Topo","Imagery","Hydrography"),
                        overlayGroups = c('Station',"Strahler Info", 'Watershed'),
                        options=layersControlOptions(collapsed=T),
                        position='topleft')
@@ -328,7 +356,7 @@ For the station(s) listed above (if any):
     
 ```{r bring in watersheds}
 # Where did you save files relative to the working directory?
-savedHere <- 'GIS/delineations/streamStatsFixes/Potomac'
+savedHere <- 'GIS/delineations/streamStatsFixes/Potomac River Basin'
 
 # read in new watersheds after manual QA
 shapes <- gsub('.prj','',list.files( savedHere, pattern="*.prj", full.names=F))
@@ -357,6 +385,291 @@ mapMe(watersheds, points, bugFilter, vafrm)
 ```{r save shapefiles}
 st_write(watersheds, paste0('GIS/delineations/', basinName,'_StreamStats_watersheds.shp'))
 st_write(points, paste0('GIS/delineations/', basinName,'_StreamStats_points.shp'))
+
+#basinName <- 'Potomac River Basin'
+#watersheds <- st_read(paste0('GIS/delineations/', basinName,'_StreamStats_watersheds.shp'))
+#points <- st_read(paste0('GIS/delineations/', basinName,'_StreamStats_points.shp'))
+```
+    
+* Stream segments within watershed layer will be clipped and buffered by 120 meter buffer (since watershed in delineated should not be an issue with buffer leaving watershed)
+* The 120 meter buffer will be intersected with the most appropriate NLCD landcover layer and any resulting landcover information will be provided to ConserveVirginia (i.e. agriculture land for BMP implementation or Forest Land for permanent conservation)
+    
+    + Bring in existing methods for landcover analysis
+    
+```{r landcover analysis functions}
+source('methods/landcoverFunctions_rebuild.R')
+library(raster)
+```
+
+    + Bring in most appropriate NLCD landcover layer (2016)
+    
+```{r NLCD landcover}
+landcoverYear <- 2016
+landcover2016 <- raster(paste0("GIS/nlcd",landcoverYear,".TIF")) 
+```
+    + And transform watersheds to appropriate CRS.
+    
+```{r crs change for buffering}
+watersheds <- st_transform(watersheds, crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs")
+points <- st_transform(points, crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs")
+```
+    
+```{r}
+# Set up dataframe to store landcover data
+template <- tibble(StationID = 'template', VALUE_11=0,VALUE_21=0,VALUE_22=0, VALUE_23=0,VALUE_24=0
+                   ,VALUE_31=0,VALUE_41=0,VALUE_42=0,VALUE_43=0,VALUE_52=0,VALUE_71=0
+                   ,VALUE_81=0,VALUE_82=0,VALUE_90=0,VALUE_95=0)
+
+#### RIPARIAN CALCULATIONS 
+# Bring in NHD polyline file
+nhd <- st_read('GIS/nhd_83albers.shp') %>% 
+  st_transform(st_crs(watersheds))
+
+
+
+# Set up dataframe to store landcover data
+template <- tibble(StationID = 'template', VALUE_11=0,VALUE_21=0,VALUE_22=0, VALUE_23=0,VALUE_24=0
+                   ,VALUE_31=0,VALUE_41=0,VALUE_42=0,VALUE_43=0,VALUE_52=0,VALUE_71=0
+                   ,VALUE_81=0,VALUE_82=0,VALUE_90=0,VALUE_95=0)
+
+finalRiparian <- data.frame(StationID=NA, YearSampled=NA, NLCD=NA, totalArea_sqMile=NA, 
+                            buffer120_areaSqMi=NA, PWater=NA, N_INDEX=NA, PFOR=NA, PWETL=NA, 
+                            PSHRB=NA, PNG=NA, PBAR=NA, PTotBAR=NA, U_INDEX=NA, PURB=NA, 
+                            PMBAR=NA, PAGT=NA, PAGP=NA, PAGC=NA, Order=NA, Method=NA, SCI=NA)
+
+#finalRiparian <- data.frame(StationID=NA,YearSampled=NA,NLCD=NA,RNAT1=NA,RFOR1=NA,RWETL1=NA,RSHRB1=NA
+#                            ,RNG1=NA,RBAR1=NA,RTotBAR1=NA,RHUM1=NA,RURB1=NA,RMBAR1=NA,RAGT1=NA,RAGP1=NA
+#                            ,RAGC1=NA,RNAT30=NA,RFOR30=NA,RWETL30=NA,RSHRB30=NA,RNG30=NA,RBAR30=NA
+#                            ,RTotBAR30=NA,RHUM30=NA,RURB30=NA,RMBAR30=NA,RAGT30=NA,RAGP30=NA,RAGC30=NA
+#                            ,RNAT120=NA,RFOR120=NA,RWETL120=NA,RSHRB120=NA,RNG120=NA,RBAR120=NA
+#                            ,RTotBAR120=NA,RHUM120=NA,RURB120=NA,RMBAR120=NA,RAGT120=NA,RAGP120=NA,RAGC120=NA) 
+
+dat <- bugScores %>%
+  group_by(StationID) %>%
+  mutate(YearSampled = paste0(year(CollDate), collapse = ', '), 
+         NLCD = landcoverYear) %>%
+  distinct(StationID, .keep_all = T) %>%
+  dplyr::select(StationID, YearSampled, NLCD, Order, Method, SCI) 
+
+# Run riparian calculations
+
+for(i in 1:nrow(watersheds)){
+  # Status update
+  print(paste0('Processing site ',i, ' of ', nrow(watersheds)))
+
+  # get watershed polygon based on StationID and NLCD year combination
+  #wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdListNLCD$StationID[i] &
+  #                            NLCD %in% uniqueWshdListNLCD$NLCD[i])
+  
+  # Subset nhd streams by each polygon
+  testnhd <- suppressWarnings(st_intersection(nhd, st_buffer(watersheds[i,],0))) %>%
+    mutate(StationID = unique(watersheds[i,]$UID), NLCDyear = landcoverYear)
+  
+  # Assign StationID to line segments pertaining to each polygon StationID
+  if(nrow(testnhd)==0){
+    # do all the joining in case watershed sampled multiple years
+    blank <- finalRiparian[1,]
+    blank[,1:length(blank)] <- NA 
+    blank <- dplyr::select(blank, -c(YearSampled, NLCD, Order, Method, SCI)) %>%
+      mutate(StationID = unique(watersheds[i,]$UID),
+             NLCD = landcoverYear,
+             totalArea_sqMile = sum(as.numeric(st_area(watersheds[i,]))) * 0.00000038610 ) %>%
+      left_join(dplyr::select(dat, StationID, YearSampled, Order, Method, SCI), by = 'StationID') %>%
+      dplyr::select(names(finalRiparian))
+    finalRiparian <- rbind(finalRiparian, blank)
+  }else{
+    finalRiparian <- rbind(finalRiparian,
+                           landuseDataManagement(landcoverCounts(template, get(paste0('landcover',landcoverYear)), 
+                                                                 st_buffer(testnhd, dist = 120)) %>%
+                                  mutate(bufferWidth = 120),                                 
+                                  dat) %>%
+                             rename('buffer120_areaSqMi' = 'totalArea_sqMile') %>%
+                             # find watershed area; area comes out in m^2 so convert to sq miles)
+                             mutate(totalArea_sqMile = sum(as.numeric(st_area(watersheds[i,]))) * 0.00000038610) %>% 
+                             dplyr::select(StationID, YearSampled, NLCD, totalArea_sqMile, buffer120_areaSqMi, everything(),
+                                           -c(S, H, Hprime, C)) %>%
+                             ungroup())
+  }
+  finalRiparian <- finalRiparian[complete.cases(finalRiparian$StationID),]
+}
+
+#save results
+write.csv(finalRiparian, paste('Results/',basinName,'.csv',sep=''), row.names= F)
+write.csv(finalRiparian, paste('Results/Adjustments/',basinName,'_fixed.csv',sep=''), row.names= F)
+
 ```
     
     
+Once you are done the above steps, please send Emma:
+* All finalized watersheds and point files from all basins analyzed (in /GIS/delineations)
+* All results (.csv's) from all basins analyzed (in /Results)
+
+
+Emma will compile all the data above and do a final QA before sending to DCR for approval.
+
+
+
+
+
+#--------------------------------------------------------------------------------------------------------------------------------
+
+
+# Combine Results and QA
+
+After data analysis and initial QA is performed by each team member, Emma will combine all results and run some final QA checks before sending data to DCR.
+
+## Parse Landcover Results
+
+The fastest way to get all data into a single format is to use purrr::map().
+
+```{r parse results}
+# names of files in directory to read in
+filenames <- list.files( 'Results/', pattern="*.csv", full.names=T)
+
+# read in files and organize
+results <- filenames %>%
+  map(read_csv) %>%
+#  map2(filenames,~mutate(.x,UID=.y)) %>% # make a StationID column
+ # map(~dplyr::select(.,UID)) %>%
+  reduce(rbind)
+```
+
+Read in fixed results
+
+```{r results adjustments}
+resultsFixed <- list.files( 'Results/Adjustments', pattern="*.csv", full.names=T) %>%
+  map(read_csv) %>%
+  reduce(rbind)
+
+
+# drop from original results and combine
+results <- filter(results, ! StationID %in% resultsFixed$StationID) %>%
+  bind_rows(resultsFixed) %>%
+  arrange(StationID)
+
+rm(resultsFixed)
+```
+
+
+
+Flat out drop, messed up watershed or made it past initially filter when it shouldn't (not that great of a site).
+•	1ASTC004.27 is grouped with Shenandoah Basin and Stream Stats is unable to delineate this watershed due to tool development limits in WV. Probably have to delineate this watershed manually. The site can also be nested with 1ASTC000.72.
+```{r}
+noWay <- c('2-JKS036.11', '1ASTC004.27','6ALEV138.19', '6BPOW166.97','6BXSD000.74','6BPOW120.12','5ANTW014.66')
+```
+
+Drop bc no 1:100k nhd in watershed 
+
+```{r}
+no100kStream <- c('2AZAL002.11','1AXJI000.38', '3-RAG000.98', '1BBKH000.03', '1BBKH000.66',
+                  '4ABHB011.31','4AFCA001.40','6BXSD000.74')
+```
+
+
+Drop above sites.
+```{r results drops}
+results <- filter(results, ! StationID %in% noWay) %>%
+  filter(! StationID %in% no100kStream)
+```
+
+Now bring in the 'real' VSCI data to drop sites that maybe should not have made it through the initial cut.
+
+```{r Drew_All_JRH}
+SCI <- readxl::read_excel('data/Drew_All_JRH.xlsx', sheet = 'VSCI_ALL') %>%
+  mutate(Method = "VSCI", SCI = `Fam SCI`) %>%
+  dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI) %>%  
+  bind_rows(read_excel('data/Drew_All_JRH.xlsx', sheet = 'VCPMI65-Chowan_ALL') %>%
+              mutate(Method = "VCPMI65-Chowan", SCI = `CPMI65-CHOWAN`, Order = NA) %>%
+              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI)) %>% 
+  bind_rows(read_excel('data/Drew_All_JRH.xlsx', sheet = 'VCPMI63+Chowan_ALL') %>% 
+              mutate(Method = "VCPMI63+Chowan", SCI = `CPMI63+CHOWAN`, Order = NA) %>%
+              dplyr::select(BenSampID, StationID, CollDate, Lat, Long, RepNum, Order, Method, SCI))
+```
+    
+    + Average SCI scores by same day replicate samples, then average by stations, then filter VCPMI >56 or VSCI >72.
+    
+```{r filter by thresholds}
+# did this in two steps because 3-PIY000.01 needs data that would get filtered out otherwise
+SCIaverages <- SCI %>%
+  group_by(StationID, CollDate) %>%
+  mutate(sameDaySCIAverage = mean(SCI)) %>%
+  ungroup() %>%
+  group_by(StationID) %>%
+  mutate(stationSCIAverage = mean(sameDaySCIAverage)) %>%
+  filter(CollDate >= as.Date('2013-01-01')) 
+
+SCIfilter <- SCIaverages %>%
+  filter(Method == 'VSCI' && stationSCIAverage >= 72 |
+           Method %in% c('VCPMI65-Chowan', 'VCPMI63+Chowan') && stationSCIAverage >= 56 ) %>% 
+  distinct(StationID, .keep_all = T) %>%
+  dplyr::select(StationID, Lat, Long, Order, Method, stationSCIAverage)
+```
+
+The sites above are the 'real' stations that should be included because they do not filter by date before averaging SCI scores. We take into account all available SCI scores in the averaging process, then we filter to sites sampled since 2013, then we filter by our 'good' site threshold.
+
+
+Now only keep sites that meet the 'real' station filter.
+
+```{r filter by real SCI averages}
+results <- filter(results, StationID %in% c(SCIfilter$StationID, '3-PIY000.01')) %>% # keep station, Brett confirmed
+  # drop RMN sites, duplicates
+  filter(! str_detect(StationID, 'RMN-')) %>%
+  distinct(StationID, .keep_all = T) 
+```
+
+
+Fix SCI scores. These have to be overwritten with Jason's data pull bc Drew's omitted some data.
+
+```{r}
+results <- dplyr::select(results, -SCI) %>%
+  left_join(dplyr::select(SCIaverages, StationID, stationSCIAverage) %>%
+              distinct(StationID, .keep_all = T),
+            by = 'StationID') %>%
+  arrange(StationID)
+```
+
+
+Initial statistics on area.
+
+```{r initial stats before nesting}
+results %>%
+  summarise(totalWatershedArea = sum(totalArea_sqMile),
+            totalBufferArea = sum(buffer120_areaSqMi))
+```
+
+
+
+
+## Organize final Watershed spatial files
+
+Combine watersheds and point files for stations that pass all filtering tests.
+
+```{r read in everyone and filter}
+# read in files, organize, and filter
+watersheds <- list.files( 'GIS/delineations', pattern="*watersheds.shp", full.names=T) %>%
+  map(st_read) %>%
+  reduce(rbind) %>% 
+  st_cast("MULTIPOLYGON") %>% #have to force to MULTIPOLYGON bc POLYGON and MULTIPOLYGON features uploaded
+  filter(UID %in% results$StationID) %>%
+  # can't run a distinct bc topology error so manually remove duplicates
+  group_by(UID) %>%
+  mutate(n = 1:n()) %>%
+  filter(n == 1)
+
+
+points <- list.files( 'GIS/delineations', pattern="*points.shp", full.names=T) %>%
+  map(st_read) %>%
+  reduce(rbind)  %>% 
+  filter(UID %in% results$StationID)
+
+st_write(watersheds, 'GIS/delineations/finalDelineationsToDCR/watersheds.shp')
+st_write(points, 'GIS/delineations/finalDelineationsToDCR/sites.shp')
+```
+
+
+Save results
+
+```{r}
+write.csv(results, 'Results/forDCR/landcoverResults.csv',row.names = F)
+```
+

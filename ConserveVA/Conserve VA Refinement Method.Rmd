@@ -1,0 +1,297 @@
+---
+title: "Conserve VA Refinement Method"
+author: "Emma Jones"
+date: "1/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# run in R 4.0.3
+
+library(tidyverse)
+library(sf)
+library(readxl)
+```
+
+## Background
+
+This script takes the initial DEQ results from the ConserveVA Methodolgy.Rmd script and refines results to a scale more desired by DCR. The data inputs are:
+* Sites selected from original DEQ Conserve VA methodology
+* Watersheds selected from original DEQ Conserve VA methodology
+* HUC12 watershed layer
+* 1:24k NHD
+
+### Method
+
+To limit area inclusions in Conserve VA more in line with DCR's methods, DEQ will:
+1. Intersect the delineated watershed with the HUC12 layer.
+    + Where the delineated watershed is larger than the HUC12 polygon that includes the station, only the HUC12 polygon the station falls into will be used for further analyses.
+2. The resulting polygon will serve as the boundary to clip 1:24k NHD.
+3. The 1:24k stream segments will be buffered to a set 200ft buffer on either side of the segment and dissolved into a single polygon.
+
+### Output
+
+DEQ will provide DCR with:
+* Polygon layer of 1:24k stream segments within delineated watershed or HUC12 high quality station falls into (whichever is smaller) buffered to a set 200ft width
+* Polyline layer of 1:24k stream segments within delineated watershed or HUC12 high quality station falls into (whichever is smaller) in case DCR wants to run segments through their stream buffering model.
+
+
+### Methodology
+
+Bring in original final stations and watersheds.
+
+```{r original final datasets}
+sites <- st_read('Results/forDCR/sites.shp') %>% arrange(UID)
+watersheds <- st_read('Results/forDCR/watersheds.shp') %>% arrange(UID)
+```
+
+
+
+Bring in HUC12 watershed layer and 1:24k NHD.
+
+```{r HUC12 and NHD}
+huc12 <- st_read('C:/HardDriveBackup/GIS/GIS_BaseLayer_Datasets.gdb', layer = 'HUC12_50_mile_buffer') %>%
+  mutate(geometry = SHAPE) %>% st_drop_geometry() %>%
+  st_as_sf()
+nhd <- st_read('C:/HardDriveBackup/GIS/NHD_H_51_GDB.gdb', layer = 'NHDFlowline') %>%
+  st_transform(st_crs(huc12))
+  #st_read('C:/HardDriveBackup/GIS/GIS_BaseLayer_Datasets.gdb', layer = 'va_2014_aus_riverine') # 1:24k resolution but not official layer
+```
+
+Intersect sites with HUC12 layer.
+
+```{r watershed huc12 intersection}
+sitesHUC12 <- st_intersection(sites, huc12) %>%#st_buffer(huc12, 0))#st_buffer(watersheds[i,],0)
+  arrange(UID)
+```
+
+Sidebar, first try to get the final area desired bc R is having issues with random watersheds after 6 tries. Just going to clip nhd in gis to R determined area and buffer in GIS.
+
+```{r}
+finalArea <- watersheds[1,] %>%
+  mutate(UID = 'TEST')
+
+for(i in 1:nrow(sitesHUC12)){
+  print(i)
+  # find area 
+  watershedArea <- filter(watersheds, UID %in% sitesHUC12[i,]$UID)
+  huc12Area <- filter(huc12, HUC12 %in% sitesHUC12[i,]$HUC_12)
+  # choose smaller area
+  if(st_area(watershedArea) > st_area(huc12Area)){
+    chosenArea <- st_intersection(st_buffer(huc12Area, 0), st_buffer(watershedArea, 0)) %>% # clip HUC12 to watershed to remove part of HUC12 downstream of site
+      mutate(UID = sitesHUC12[i,]$UID) %>%
+      dplyr::select(UID)
+    } else {
+      chosenArea <- dplyr::select(watershedArea, UID)
+    }
+    finalArea <- bind_rows(finalArea, chosenArea)
+}
+
+finalArea <- filter(finalArea, UID != 'TEST') %>%
+  dplyr::select(UID)
+
+
+# now intersect nhd
+flowlines <- st_intersection(st_buffer(finalArea, 0), st_zm(nhd))
+
+# now buffer flowlines      
+flowlinesBuffer <- st_transform(flowlines, crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") %>% # transform crs to get units
+  st_buffer(dist = 60.96) # buffer 200ft (convert to m to match units)
+
+# dissolve boundaries between polygons
+flowlinesBufferSmooth <- flowlinesBuffer %>% 
+  group_by(UID) %>%
+  summarise() %>%
+  st_transform(4326) # transform back to original crs
+      
+# clip buffered area to within original bounding polygon (to drop bit of buffer outside original poly downstream of site)
+flowlinesBufferSmoothFin <- st_intersection(flowlinesBufferSmooth, st_buffer(finalArea, 0)) %>%
+      dplyr::select(UID)
+
+st_write(finalArea, 'Results/forDCR/finalArea.shp')
+st_write(flowlines, 'Results/forDCR/flowlines.shp')
+st_write(flowlinesBuffer, 'Results/forDCR/flowlinesBuffer.shp')
+st_write(flowlinesBufferSmooth, 'Results/forDCR/flowlinesBufferSmooth.shp')
+st_write(flowlinesBufferSmoothFin, 'Results/forDCR/flowlinesBufferSmoothFin.shp')
+st_write(flowlinesBufferSmoothFin, 'Results/forDCR/riparian200ftBuffer.shp')
+
+# remove duplicates for smaller area
+flowlinesTotalArea <- mutate(flowlinesBufferSmooth, total = 'all') %>%
+  group_by(total) %>%
+  summarise()
+
+sum(st_area(flowlinesTotalArea))/1000000 # m2 to km2
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Previous methods attempted (do not use):
+
+
+
+First, remove all nested subwatersheds identified in previous analyses to remove duplicated data.
+
+```{r nested watersheds}
+#nestedSubwatersheds <- read_excel('Results/forDCR/Results.xlsx', sheet = 'nested_Subwatersheds') %>%
+#  pivot_longer(-`Downstream Watershed`, names_to = 'Subwatershed', values_to = 'Station') %>%
+#  filter(!is.na(Station))
+
+#sites <- filter(sites, ! UID %in% nestedSubwatersheds$Station) 
+#watersheds <- filter(watersheds, ! UID %in% nestedSubwatersheds$Station) 
+```
+
+
+
+Determine if intersected HUC12 or delineated watershed is larger.
+
+- first test on small dataset to make sure methods work
+
+```{r testing methods}
+huc12Area <- filter(huc12, HUC12 %in% sitesHUC12[1,]$HUC_12)
+
+st_intersection(huc12Area, st_zm(nhd))
+```
+- WKB type 11 issue, have a look at data structure
+
+```{r troubleshoot issue}
+as.data.frame(table(st_geometry_type(nhd)))
+```
+
+There is a MULTICURVE thrown in with MULTILINESTRING, cast the data to fix the geometry issue so geoprocessing can occur.
+
+```{r cast data}
+nhd2 <- st_cast(nhd, "MULTILINESTRING")
+```
+
+Now that everything is cast to the same data structure, try intersection again.
+
+```{r test again}
+st_intersection(huc12Area, nhd2)
+```
+
+Worked. Now remove extra data.
+
+```{r testing cleanup}
+rm(nhd); rm(huc12Area)
+```
+
+
+
+```{r}
+finalArea <- watersheds[1,] %>%
+  mutate(UID = 'TEST')
+
+for(i in 1:nrow(sitesHUC12)){
+  print(i)
+  # find area 
+  watershedArea <- filter(watersheds, UID %in% sitesHUC12[i,]$UID)
+  huc12Area <- filter(huc12, HUC12 %in% sitesHUC12[i,]$HUC_12)
+  # choose smaller area
+  if(st_area(watershedArea) > st_area(huc12Area)){
+    flowlines <- st_intersection(st_buffer(huc12Area, 0), st_zm(nhd)) %>%#nhd2) %>%
+      # transform crs to get units
+      st_transform(crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m
+                   +no_defs") %>%
+      # buffer 200ft (convert to m to match units)
+      st_buffer(dist = 60.96) %>%
+      # add unifying feature for dissolve
+      mutate(UID = sitesHUC12[i,]$UID) %>%
+      # dissolve boundaries between polygons
+      group_by(UID) %>%
+      summarise() %>%
+      # transform back to original crs
+      st_transform(4326) %>%
+      # clip buffered area to within original bounding polygon (to drop bit of buffer outside original poly downstream of site)
+      st_intersection(st_buffer(huc12Area, 0)) %>%
+      dplyr::select(UID)
+    #flowlines <- st_cast(flowlines, 'MULTIPOLYGON')
+    } else {
+      flowlines <- st_intersection(st_buffer(watershedArea, 0), st_zm(nhd)) %>%#nhd2) %>%
+        # transform crs to get units
+        st_transform(crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m
+                     +no_defs") %>%
+        # buffer 200ft (convert to m to match units)
+        st_buffer(dist = 60.96) %>%
+        # dissolve boundaries between polygons
+        group_by(UID) %>%
+        summarise() %>%
+        # transform back to original crs
+        st_transform(4326) %>%
+        # clip buffered area to within original bounding polygon (to drop bit of buffer outside original poly downstream of site)
+        st_intersection(st_buffer(watershedArea, 0)) %>%
+        dplyr::select(UID)
+      #flowlines <- st_cast(flowlines, 'MULTIPOLYGON')
+    }
+  #if(nrow(flowlines) > 0){
+    finalArea <- bind_rows(finalArea, flowlines)
+  #}
+}
+
+finalArea <- filter(finalArea, UID != 'TEST') %>%
+  dplyr::select(UID)
+
+#st_write(finalArea, 'finalArea5.shp')
+```
+```{r}
+filter(finalArea, geometry == list())
+```
+
+
+
+Final area
+
+```{r}
+sum(st_area(finalArea))/1000000 # m2 to km2
+```
+
+
+
+z <- st_transform(flowlines, crs= "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs") %>%
+  st_buffer(dist = 60.96) %>%
+  st_union()
+plot(z)
+```
+
+
+Database:	C:\HardDriveBackup\GIS\GIS_BaseLayer_Datasets.gdb
+Feature Dataset:	Hydrology
+Feature Class:	HUC12_50_mile_buffer
