@@ -56,6 +56,9 @@ rsconnect/
 *.Rproj
 .Rproj
 *.jpg
+*.RDS
+*.xlsx
+
 
 tigerRoadsPull/
 GISdata/
