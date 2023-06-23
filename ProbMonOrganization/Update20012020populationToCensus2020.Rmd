@@ -1,0 +1,214 @@
+---
+title: "Add population metrics 2020 census"
+author: "Emma Jones"
+date: "5/30/2023"
+output: html_document
+---
+
+THis script overviews how to update all station watersheds 2001-2020 with census 2020 data to complete the dataset for IR2024 release. The 2021-2022 sites were automatically run with these new metrics, but we need to backtrack using this script to update the rest of the database for release.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(tidyverse)
+library(raster)
+library(rgdal)
+library(maptools)
+library(rgeos)
+#library(reshape)
+library(reshape2)
+library(sf)
+library(readxl)
+
+
+# Establish a GIS working directory
+# This is where you will source all static GIS data for the project (not your input watersheds)
+wd <- "E:/evjones/HardDriveBackup/GIS/ProbMonGIS/GISdata"
+
+# Where do you want to save the outputs? 
+saveHere <- 'Results/ProbWadeable20212022/'
+
+
+
+# Bring in watersheds
+
+# first bring in pop2000 bc relatively tiny and has appropriate crs to match further layers
+pop2000 <- st_read(paste0(wd,'/pop2000final.shp'))
+
+
+# Bring in landcover functions for appropriate yearly analysis
+source('../landcoverFunctions_rebuild.R')
+
+
+```
+
+
+Bring in all stations in existing stations in dataset
+
+```{r}
+
+# Final 2001-2020 station list, just targeted data for wadeable chapter
+stations <- read_csv('C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_EVJ.csv')
+  
+
+
+# polygons
+wshdPolys <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/Watersheds.gdb', 'AllWatersheds_through2022_burnEverythingElse') %>%
+  filter(StationID %in% stations$StationID) %>% 
+  mutate(StationID = sub("\r\n" ,"",StationID)) %>% # get rid of any stray spaces after StationID in attribute table
+  dplyr::select(StationID) %>%
+  st_transform(st_crs(pop2000))
+
+missing <- filter(stations, !StationID %in% wshdPolys$StationID)
+
+if(nrow(missing) > 0 ){
+  # Bring in all watersheds to grab those for missing trend sites
+  trendWatersheds <- st_read('E:/evjones/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/trend_StreamStats/trend_StreamStats_watersheds.shp') %>%
+    dplyr::rename(StationID=UID) %>%
+    filter(StationID %in% missing$StationID) %>%
+    dplyr::select(StationID)%>%
+    st_transform(st_crs(pop2000))
+  
+  
+  # add these sites to wshdPolys for new spatial data
+  wshdPolys <- rbind(wshdPolys, trendWatersheds)
+  # anything missing???
+  wshdPolys$StationID[!(wshdPolys$StationID %in% missing$StationID )]
+  # cool 
+  rm(trendWatersheds)
+}
+rm(missing)
+
+uniqueWshdList <- unique(as.character(wshdPolys$StationID)) 
+
+```
+
+
+Pull existing population metrics
+
+```{r}
+pop2000results <- dplyr::select(stations, StationID, Year, wshdPOP2000,  POPDENS2000)
+pop2010results <- dplyr::select(stations, StationID, Year, wshdPOP2010,  POPDENS2010)
+```
+
+
+Run population metrics on these watersheds using census 2020 dataset
+
+```{r}
+# 2020 census population data information
+pop2020 <-  st_read(paste0(wd,'/pop2020.shp')) %>% 
+  st_transform(st_crs(wshdPolys)) %>% 
+  mutate(AREA = as.numeric(st_area(.))) # polygon area in m^2
+
+pop2020results <- data.frame(StationID=NA,wshdPOP2020=NA,POPDENS2020= NA)
+
+for(i in 1:length(uniqueWshdList)){ # only need to do this calculation once per polygon
+  # Status update
+  print(paste0('Processing site ',i, ' of ', length(uniqueWshdList)))
+  
+  # get watershed polygon based on StationID and NLCDyear combination
+  wshdPolyOptions <- filter(wshdPolys, StationID %in% uniqueWshdList[i])
+  
+  pop_ <- popCalculation(pop2020, st_buffer(wshdPolyOptions[1,],0), POP20, 2020) # buffer helps with topology issues
+  pop2020results <- rbind(pop2020results,pop_)
+  pop2020results <- pop2020results[complete.cases(pop2020results$StationID),]
+}
+
+#write.csv(pop2020results,paste0(saveHere,'/pop2020results.csv', sep=''), row.names= F)
+pop2020results <- read.csv(paste0('../',saveHere,'/pop2020results.csv', sep='')) %>% 
+  distinct(StationID, .keep_all = T)
+
+population <- left_join(pop2000results, pop2010results, by = c('StationID', 'Year')) %>%
+  left_join(pop2020results, by = 'StationID') %>% 
+  mutate(POPCHG2000_2010 = ((POPDENS2010 - POPDENS2000) / POPDENS2000) * 100,
+         POPCHG2010_2020 = ((POPDENS2020 - POPDENS2010) / POPDENS2010) * 100,
+         POPCHG2000_2020 = ((POPDENS2020 - POPDENS2000) / POPDENS2000) * 100) 
+
+
+```
+
+Now add back to the official dataset
+
+
+```{r}
+
+# Add to final results
+Result <- stations %>% 
+  dplyr::select(-c(wshdPOP2000:POPCHG2000_2010)) %>% 
+  left_join(population %>% 
+              dplyr::select(-Year) ,by='StationID') %>%  #only join on StationID bc wshds same all years
+  dplyr::select(DataSource:siteRain_inyr, wshdPOP2000:POPCHG2000_2020, RDLEN:STXRD)
+
+glimpse(Result)
+```
+
+Save this version out for use in IR2024
+
+```{r}
+write.csv(Result, 'C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_EVJ_fixedAreaAndUpdatedPopulation.csv')
+```
+
+
+
+```{r}
+fixedArea <- read.csv('C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_EVJ_fixedAreaNLCD.csv') %>% 
+  rename(`Ortho P` = 'Ortho.P',
+         `Hg C` = 'Hg.C')
+
+fixedAreaPop <- read.csv('C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/Results/ProbWadeableAreaFixesLandcoverRerun/population.csv')
+
+pop2020results <- read.csv('C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/Results/ProbWadeable20212022/pop2020results.csv') %>% 
+  distinct(StationID, .keep_all = T) %>% 
+  filter(! StationID %in% fixedAreaPop$StationID) %>% 
+  bind_rows(dplyr::select(fixedAreaPop, StationID, wshdPOP2020, POPDENS2020)) %>% 
+  arrange(StationID)
+```
+
+
+```{r}
+pop2000results <- dplyr::select(fixedArea, StationID, Year, wshdPOP2000,  POPDENS2000)
+pop2010results <- dplyr::select(fixedArea, StationID, Year, wshdPOP2010,  POPDENS2010)
+```
+
+
+Run population metrics on these watersheds using census 2020 dataset
+
+```{r}
+
+
+
+
+population <- left_join(pop2000results, pop2010results, by = c('StationID', 'Year')) %>%
+  left_join(pop2020results, by = 'StationID') %>% 
+  mutate(POPCHG2000_2010 = ((POPDENS2010 - POPDENS2000) / POPDENS2000) * 100,
+         POPCHG2010_2020 = ((POPDENS2020 - POPDENS2010) / POPDENS2010) * 100,
+         POPCHG2000_2020 = ((POPDENS2020 - POPDENS2000) / POPDENS2000) * 100) 
+
+
+```
+
+Now add back to the official dataset
+
+
+```{r}
+
+# Add to final results
+Result <- fixedArea %>% 
+  dplyr::select(-c(wshdPOP2000:POPCHG2000_2010)) %>% 
+  left_join(population  ,by=c('StationID', 'Year')) %>%  #only join on StationID bc wshds same all years
+  dplyr::select(DataSource:siteRain_inyr, wshdPOP2000:POPCHG2000_2020, RDLEN:STXRD) %>% 
+  arrange(Year, StationID)
+
+glimpse(Result)
+```
+
+Save this version out for use in IR2024
+
+```{r}
+write.csv(Result, 'C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_EVJ_fixedAreaAndUpdatedPopulation.csv',
+          na = '', row.names = F)
+```
+
+

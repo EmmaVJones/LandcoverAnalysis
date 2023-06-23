@@ -43,8 +43,8 @@ rsconnect/
 
 
 
-
 # special files to ignore
+*.yml
 *.csv
 *.zip
 .Rproj.user

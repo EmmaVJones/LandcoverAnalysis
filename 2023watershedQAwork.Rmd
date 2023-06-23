@@ -1,0 +1,287 @@
+---
+title: "2023 watershed and landcover QA work"
+author: "Emma Jones"
+date: "5/31/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+```
+
+Lots of issues noted in 2023 while EMma was wrangling data for IR2024 prob chapter and Kelly was identifying watershed area for fish EDAS for IBI development.
+
+This script walks through the updates and how they were processed.
+
+
+## Kelly's dupes
+
+Kelly noticed there were a number of duplicate sites in HardDriveBackup\GIS\ProbMonGIS\DelineatedWatersheds/Watersheds.gdb/AllWatersheds_through2022 
+These are identified in the dataset below and Emma and Kelly manually QAed and deleted the bad sites. This also resulted in a number of watersheds that were flat our wrong and needing full re-delineation. 
+
+```{r}
+dupes <- read.csv('E:/evjones/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2023_QAwork/IR2024NoDups.csv') %>% 
+  filter(n >1) %>% 
+  distinct(StationID)
+```
+
+These watersheds needed to be totally dropped and redelineated.
+
+```{r bring in fixed watersheds}
+watersheds <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/Watersheds.gdb',
+                      layer = 'AllWatersheds_through2022_archive')
+
+# Where did you save files relative to the working directory?
+savedHere <- 'E:/evjones/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2023_QAwork'
+
+# read in new watersheds after manual QA
+shapes <- c("3-RAP051.21", "8-NAR065.95", "8-SAR040.35")#gsub('.prj','',list.files( savedHere, pattern="*.prj", full.names=F))
+filenames <- paste0(savedHere, '/',shapes, '.shp')
+  
+# read in shapefiles and organize
+newSheds <- filenames %>%
+  map(st_read) %>%
+  map2(shapes,~mutate(.x,StationID=.y)) %>% # make a StationID column
+  map(~dplyr::select(.,StationID)) %>%
+  reduce(rbind)
+
+# Combine with full list of watersheds, QAed
+watershedsAll <- watersheds %>% 
+  dplyr::select(StationID, SiteID) %>% 
+  rbind(newSheds ) %>%
+  arrange(StationID)
+
+st_write(newSheds, 'E:/evjones/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2023_QAwork/newSheds.shp')
+
+```
+
+
+
+```{r}
+check <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/Watersheds.gdb',
+                      layer = 'AllWatersheds_through2022_QA')
+View(check %>% st_drop_geometry())
+```
+
+
+putting fixed sites in E:\evjones\HardDriveBackup\GIS\ProbMonGIS\DelineatedWatersheds\YearlyAnalyses\2023_QAwork\incorrectArea
+
+need to join existing siteID to new watersheds but still delete old watersheds with same name
+	
+	
+2-JKS070.97 is a known historical site issue and has been changed to  2-JKS063.03
+4AROA134.97 doesnt exist in CEDS
+5AMHN001.22 and 5AMHN003.95 still being sorted
+
+
+
+
+## Area check
+
+One of the easiest ways to find issues with delineated watersheds is to calculate the area of each polygon and then organize by DEQ rivermile. If the watershed area is more than the lower rivermile in ascending order, then we have a problem.
+
+```{r}
+checkArea <- check %>% 
+  mutate(`Area m2` = st_area(.),# watershed area in m^2
+         `Area km2` = as.numeric(st_area(.))/ 1000) %>% # watershed area in km^2
+  arrange(StationID) %>% 
+  st_drop_geometry() %>% # dont need this right now
+  # make two fields extracting stream code and then rivermile
+  mutate(streamCode = str_extract(StationID, "^.{5}"),
+         riverMile = as.numeric(str_sub(StationID, - 6, - 1))) %>% 
+  dplyr::select(StationID, `Area km2`, streamCode, riverMile) %>% # only what we care about right now
+  arrange(streamCode, riverMile) %>% #get the dataset in the correct order
+  # bring the next site in order up to the previous row for comparison purposes
+  mutate(nextCode = lead(streamCode),
+         nextRivermile = lead(riverMile),
+         nextArea = lead(`Area km2`)) %>% 
+  mutate(Valid = case_when(nextCode != streamCode ~ "Not Applicable",
+                           nextCode == streamCode & 
+                             nextRivermile > riverMile & 
+                             nextArea < `Area km2` ~ "Pass QA",
+                           nextCode == streamCode & 
+                             nextRivermile > riverMile & 
+                             nextArea >= `Area km2` ~ "Fail QA",
+                           TRUE ~ NA_character_))
+  
+
+```
+
+Which sites have issues?
+ 
+```{r}
+View(checkArea %>% filter(Valid == 'Fail QA'))
+```
+
+Go back in and get those out of there and delineate properly!
+
+## Reorganize fixed watersheds
+
+All re-delineated watersheds are stored in E:\evjones\HardDriveBackup\GIS\ProbMonGIS\DelineatedWatersheds\YearlyAnalyses\2023_QAwork\incorrectArea
+
+Grab all of these new watersheds, glean what metadata we can from the original dataset, remove the bad watersheds from the original dataset, and smash new watersheds with metadata into the officially official geodatabase.
+
+```{r bring in fixed watersheds}
+# Where did you save files relative to the working directory?
+savedHere <- 'E:/evjones/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2023_QAwork/incorrectArea'
+
+# read in new watersheds after manual QA
+shapes <- gsub('.prj','',list.files( savedHere, pattern="*.prj", full.names=F))
+filenames <- paste0(savedHere, '/',shapes, '.shp')
+  
+# read in shapefiles and organize
+newSheds <- filenames %>%
+  map(st_read) %>%
+  map2(shapes,~mutate(.x,StationID=.y)) %>% # make a StationID column
+  map(~dplyr::select(.,StationID)) %>%
+  reduce(rbind) 
+
+newSheds <- left_join(newSheds, 
+                      dplyr::select(check, StationID, SiteID) %>% st_drop_geometry(),
+                      by = 'StationID') %>% 
+  mutate(across(where(is.factor), as.character)) %>% 
+  st_transform(st_crs(check)) %>% 
+  st_cast('MULTIPOLYGON') %>% 
+  dplyr::select(StationID, SiteID)
+
+# Combine with QAed watersheds
+watersheds <- check %>% 
+  filter(StationID != '2-JKS070.97') %>%  # drop site with known name change
+  dplyr::select(StationID, SiteID) %>% 
+  mutate(across(where(is.factor), as.character)) %>% 
+  filter(! StationID %in% newSheds$StationID) %>%
+  rename("geometry" ="Shape") %>% 
+  rbind(newSheds) %>%
+  arrange(StationID)
+
+# calculate new area
+watersheds <- watersheds %>% 
+  mutate(`Area m2` = st_area(.),# watershed area in m^2
+         `Area sqmi` = as.numeric(st_area(.))/ 2590000) %>% # watershed area in sq miles
+    dplyr::select(StationID, SiteID, `Area sqmi`, geometry)
+
+
+st_write(watersheds, 'C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/QAedWatershedsThrough2022.shp')
+
+```
+In ArcPro, convert the C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/QAedWatershedsThrough2022.shp into a featureclass and save in the Watersheds.gdb (C:\HardDriveBackup\GIS\ProbMonGIS\DelineatedWatersheds\Watersheds.gdb) as AllWatersheds_through2022_burnEverythingElse.
+
+
+
+## Make sure landcover stats accurate
+
+Now that we have changed a handful of watersheds, we need to double check if landcover data previously published needs to be updated with these new watersheds. 
+
+Bring in 2001-2020 landcover data
+
+```{r}
+original <- read.csv('C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_EVJ.csv')
+
+```
+
+
+Check to see if any watersheds that were updated are in this dataset
+
+```{r}
+# Where did you save files relative to the working directory?
+savedHere <- 'E:/evjones/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/YearlyAnalyses/2023_QAwork/incorrectArea'
+
+# read in new watersheds after manual QA
+shapes <- gsub('.prj','',list.files( savedHere, pattern="*.prj", full.names=F))
+
+fixThese <- filter(original, StationID %in% shapes)
+```
+
+So these 23 sites need to have landcover rerun.
+
+### Save good data
+
+let's keep all the good metadata for these sites
+
+```{r}
+fixThese <- dplyr::select(fixThese, DataSource:NLCD)
+
+```
+
+
+run watershed landcover methods: C:\HardDriveBackup\R\GitHub\LandcoverAnalysis\ProbMonOrganization\ProbWadeableAreaFixesLandcoverRerun.R
+
+So once that lengthy process is done, we need to bring the fixed metadata back in and correct in the "official" dataset that will be smashed in for IR2024.
+
+```{r}
+fixed <- fixThese %>% 
+  left_join(read.csv('C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/Results/ProbWadeableAreaFixesLandcoverRerun/Result10.csv') %>% 
+              dplyr::select(-c(wshdPOP2020, POPDENS2020, POPCHG2010_2020, POPCHG2000_2020)),
+            by = c('StationID','YearSampled', 'NLCD'))
+
+names(fixed) == names(original)
+
+together <- filter(original, ! StationID_Trend %in% fixed$StationID_Trend) %>% 
+  bind_rows(fixed) %>% 
+  arrange(station) %>% 
+  rename(`Ortho P` = 'Ortho.P',
+         `Hg C` = 'Hg.C')
+
+write.csv(together, 'C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_fixedArea.csv')
+```
+
+
+## New NCLD
+
+So the NLCD2019 release means we need to rerun landcover and riparian metrics for all sites sampled from 2019-2022. This means we need to rerun these metrics for all 2019, 2020 sites in this dataset.
+
+This was done in `C:\HardDriveBackup\R\GitHub\LandcoverAnalysis\ProbMonOrganization\ProbWadeableNLCDFixesLandcoverRerun.R` and results were saved in `C:\HardDriveBackup\R\GitHub\LandcoverAnalysis\Results\ProbWadeableNLCDFixesLandcoverRerun\`
+
+
+BRing in new NLCD 2019 landcover metrics
+
+```{r}
+newNLCD <- read.csv('C:/HardDriveBackup/R/GitHub/LandcoverAnalysis/Results/ProbWadeableNLCDFixesLandcoverRerun/Result2.csv')
+```
+
+Remove and replace old metrics. Save results
+
+```{r}
+together <- read.csv('C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_fixedArea.csv') %>% 
+  rename(`Ortho P` = 'Ortho.P',
+         `Hg C` = 'Hg.C')
+old1920 <- filter(together, Year %in% c(2019, 2020)) %>% 
+  dplyr::select(-c(NLCD:wshdImpPCT)) %>% 
+  left_join(newNLCD, by = c('StationID','YearSampled')) %>% 
+  dplyr::select(DataSource:YearSampled, NLCD:wshdImpPCT, MunMajor:STXRD )
+
+togetherNew <- filter(together, ! Year %in% c(2019, 2020)) %>% 
+  bind_rows(old1920) %>% 
+  arrange(Year, StationID)
+
+write.csv(togetherNew, 'C:/HardDriveBackup/R/GitHub/FreshwaterProbMonIntegratedReports/2024ProbChapter/originalData/Wadeable_ProbMon_2001-2020_EVJ_fixedAreaNLCD.csv')
+```
+
+ 
+
+## Population stats... cenusus outside VA for 2001-2022???
+
+Holding on this for IR2024.
+
+But we do need to rerun population metrics across the entire wadeable database (including these area fixes) with the new 2020 census. WE will add metrics describing the population in the watershed to all watersheds, pop density, and pop change from 2010-2020 and 2000-2020.
+
+This was done in `C:\HardDriveBackup\R\GitHub\LandcoverAnalysis\ProbMonOrganization\Update20012020populationToCensus2020.Rmd` and the output was saved as `C:\HardDriveBackup\R\GitHub\FreshwaterProbMonIntegratedReports\2024ProbChapter\originalData\Wadeable_ProbMon_2001-2020_EVJ_fixedAreaNLCDAndUpdatedPopulation.csv`
+
+
+
+A note will be added into the ReadMe explicitly stating that population is relective of Virginia population. 
+We need to pull and organize the surrounding state population for each census (2000, 2010, 2020), clip to the watersheds that drain to VA, and then use this to rerun all population metrics (maybe for IR2026?).
+
+The good news is that we are publishing on wadeable data, so the extent to which we might be missing population from large watersheds draining into VA isn't as critical as if we were publishing on boatable systems. 
+
+
+## Recap
+
+So, for watersheds describing sites sampled from 2001-2022, we have:
+- QAed a number of watershed issues (wadeable and boatable) and fixed them (duplicates in the database and just wonky area compared to surrounding rivermile area)
+- recalculated the area of all watersheds and embedded that information as sq mi in the latest and greatest version of our watershed spatial dataset (C:\HardDriveBackup\GIS\ProbMonGIS\DelineatedWatersheds\Watersheds.gdb\AllWatersheds_through2022_burnEverythingElse)
+- reran population metrics across entire (new area) 2001-2020 database to reflect the latest census information (2020)
+
+Now it is time to go back to C:\HardDriveBackup\R\GitHub\FreshwaterProbMonIntegratedReports\2024ProbChapter\1.dataAcquisition.Rmd to smash in 2021-2022 landcover metrics and finalize data for IR2024 population estimates,

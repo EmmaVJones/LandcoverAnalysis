@@ -1,0 +1,59 @@
+---
+title: "Reference Site Search"
+author: "Emma Jones"
+date: "1/14/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+# R 3.6.2
+library(tidyverse)
+library(sf)
+library(readxl)
+```
+
+## Background
+
+This project is the initial data organization step to building a reference site watershed database and subsequent landuse information. This script will first search for all available watersheds in the various sources and make a single dataset for this information. New watersheds will be tacked on to this one dataset. 
+
+Then, we will search through Jason's master reference site list to identify which stations need watershed information still. Those sites will be prioritized for delineation by a team of R users and will subsequently be added to the watershed master dataset.
+
+## Find existing watersheds
+
+```{r}
+wadeableProbMon <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/Watersheds.gdb', 'AllWatersheds_through2020')
+
+NRSARMN <- st_read('C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/Watersheds.gdb', 'NRSAandRMN') 
+
+prob <- dplyr::select(wadeableProbMon, StationID)
+nrsa <- dplyr::select(NRSARMN, StationID)
+
+allWatersheds <- rbind(prob, nrsa)
+
+#st_write(allWatersheds, 'C:/HardDriveBackup/GIS/ProbMonGIS/DelineatedWatersheds/allWatersheds.shp')
+
+```
+
+## Reference Site list
+
+```{r}
+refSites <- read_excel('RefSitesSourceGIS.xlsx', sheet = 'GIS') %>% 
+  left_join(read_csv('C:/HardDriveBackup/R/GitHub/IBIdevelopment/data/otherProjectData/finalEnvData.csv') %>% 
+              distinct(StationID, .keep_all=TRUE) %>% 
+              dplyr::select(StationID, Order),
+            by = 'StationID') %>% 
+  left_join(readxl::read_excel('C:/HardDriveBackup/R/GitHub/IBIdevelopment/data/aquametBioDataOut/aquametBio_final_03082022.xlsx',
+                               sheet = 'BenSamps') %>% 
+              distinct(StationID, .keep_all = T) %>% 
+              dplyr::select(StationID, Order), 
+            by = 'StationID') %>% 
+  mutate(Order = coalesce(Order.x, Order.y)) %>% 
+  dplyr::select(-c(Order.x, Order.y))
+
+missing <- filter(refSites, ! StationID %in% allWatersheds$StationID) 
+
+write.csv(missing, 'refSitesMissingWshd.csv')
+```
+
+308 sites missing. not bad. 

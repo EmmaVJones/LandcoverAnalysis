@@ -26,10 +26,10 @@ library(sf) # 0.7-7
 
 # e.g. https://www2.census.gov/geo/tiger/TIGER2018/  is the appropriate web address for 2018 data.
 
-year <- 2010
+year <- 2022
 FTPaddress <- paste0("https://www2.census.gov/geo/tiger/TIGER",year,"/ROADS")
 dirName <- 'tigerRoadsPull' # create a folder in the project directory with this exact name to store
-                            # all downloaded zip files
+                            # 
 
 
 
@@ -95,12 +95,58 @@ filenames_slim [!(filenames_slim %in% filenamesUnzipped_slim )]
 # Step 5: Read in unzipped files and combine to single object
 filenamesUnzipped <- paste0(dirName,'/unzipped/',year,'/',gsub('.shx','.shp', filenamesUnzipped)) # change .cpg to .shp for file reading in
 
-shapefiles <- filenamesUnzipped %>%
+shapefiles <- filenamesUnzipped[1:50] %>% # might need to parse this going forward to conserve memory
+  map(st_read) %>%
+  reduce(rbind)
+
+
+# Step 6: Save out shapefile
+st_write(shapefiles, paste0('GISdata/TIGERroads/', year, '50tigerRoads.shp'))
+
+
+rm(shapefiles)
+
+
+shapefiles <- filenamesUnzipped[51:100] %>% # might need to parse this going forward to conserve memory
   map(st_read) %>%
   reduce(rbind)
   
 
 # Step 6: Save out shapefile
-st_write(shapefiles, paste0('GISdata/TIGERroads/', year, 'tigerRoads.shp'))
+ st_write(shapefiles, paste0('GISdata/TIGERroads/', year, '100tigerRoads.shp'))
 
 
+rm(shapefiles)
+
+shapefiles <- filenamesUnzipped[101:150] %>% # might need to parse this going forward to conserve memory
+  map(st_read) %>%
+  reduce(rbind)
+
+
+# Step 6: Save out shapefile
+st_write(shapefiles, paste0('GISdata/TIGERroads/', year, '150tigerRoads.shp'))
+
+
+
+rm(shapefiles)
+
+shapefiles <- filenamesUnzipped[151:200] %>% # might need to parse this going forward to conserve memory
+  map(st_read) %>%
+  reduce(rbind)
+
+
+# Step 6: Save out shapefile
+st_write(shapefiles, paste0('GISdata/TIGERroads/', year, '200tigerRoads.shp'))
+
+
+rm(shapefiles)
+
+shapefiles <- filenamesUnzipped[201:length(filenamesUnzipped)] %>% # might need to parse this going forward to conserve memory
+  map(st_read) %>%
+  reduce(rbind)
+
+
+# Step 6: Save out shapefile
+st_write(shapefiles, paste0('GISdata/TIGERroads/', year, '229tigerRoads.shp'))
+rm(shapefiles
+   )
